@@ -35,7 +35,7 @@ client.on('messageCreate', async (message) => {
         );
 
         await message.channel.send({
-            content: 'Click the button below to receive assistance from our staff team with any issue.',
+            content: 'Click the button below to create a ticket.',
             components: [row]
         });
     }
@@ -109,11 +109,21 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
     if (interaction.customId.startsWith('close_ticket_')) {
+        await interaction.deferReply({ ephemeral: true });
+
         const ticketChannelId = interaction.customId.replace('close_ticket_', '');
-        const ticketChannel = await client.channels.fetch(ticketChannelId);
+        
+        let ticketChannel;
+        try {
+            ticketChannel = await client.channels.fetch(ticketChannelId);
+        } catch (error) {
+            console.error('Error fetching ticket channel:', error);
+            await interaction.editReply({ content: 'Could not find ticket channel.' });
+            return;
+        }
 
         if (!ticketChannel) {
-            await interaction.reply({ content: 'Could not find ticket channel.', ephemeral: true });
+            await interaction.editReply({ content: 'Could not find ticket channel.' });
             return;
         }
 
@@ -121,66 +131,82 @@ client.on('interactionCreate', async (interaction) => {
             let allMessages = [];
             let lastMessageId;
 
+            // Fetch all messages from the ticket channel
             while (true) {
-                const options = { limit: 100 };
-                if (lastMessageId) options.before = lastMessageId;
+                try {
+                    const options = { limit: 100 };
+                    if (lastMessageId) options.before = lastMessageId;
 
-                const messages = await ticketChannel.messages.fetch(options);
-                if (messages.size === 0) break;
+                    const messages = await ticketChannel.messages.fetch(options);
+                    if (messages.size === 0) break;
 
-                allMessages.push(...messages.values());
-                lastMessageId = messages.last().id;
+                    allMessages.push(...messages.values());
+                    lastMessageId = messages.last().id;
+                } catch (fetchError) {
+                    console.error('Error fetching messages:', fetchError);
+                    break;
+                }
             }
 
             allMessages.reverse();
 
-            const chatlogChannel = await client.channels.fetch(chatlogChannelId);
+            // Send chatlog to chatlog channel if it exists
+            try {
+                const chatlogChannel = await client.channels.fetch(chatlogChannelId);
 
-            if (chatlogChannel) {
-                const chatlogEmbed = new EmbedBuilder()
-                    .setTitle(`📋 Chat Log - ${ticketChannel.name}`)
-                    .setDescription(
-                        allMessages.slice(0, 10).map(msg =>
-                            `**${msg.author.tag}**: ${msg.content.substring(0, 100)}`
-                        ).join('\n') || 'No messages'
-                    )
-                    .addFields(
-                        { name: 'Ticket Channel', value: `<#${ticketChannelId}>`, inline: true },
-                        { name: 'Total Messages', value: `${allMessages.length}`, inline: true },
-                        { name: 'Closed By', value: `<@${interaction.user.id}>`, inline: true },
-                        { name: 'Closed At', value: `<t:${Math.floor(Date.now() / 1000)}:f>` }
-                    )
-                    .setColor(0xff0000)
-                    .setThumbnail(interaction.user.displayAvatarURL());
+                if (chatlogChannel) {
+                    const chatlogEmbed = new EmbedBuilder()
+                        .setTitle(`📋 Chat Log - ${ticketChannel.name}`)
+                        .setDescription(
+                            allMessages.slice(0, 10).map(msg =>
+                                `**${msg.author.tag}**: ${msg.content.substring(0, 100)}`
+                            ).join('\n') || 'No messages'
+                        )
+                        .addFields(
+                            { name: 'Ticket Channel', value: `<#${ticketChannelId}>`, inline: true },
+                            { name: 'Total Messages', value: `${allMessages.length}`, inline: true },
+                            { name: 'Closed By', value: `<@${interaction.user.id}>`, inline: true },
+                            { name: 'Closed At', value: `<t:${Math.floor(Date.now() / 1000)}:f>` }
+                        )
+                        .setColor(0xff0000)
+                        .setThumbnail(interaction.user.displayAvatarURL());
 
-                if (allMessages.length > 0) {
-                    const chatContent = allMessages.map(msg =>
-                        `[${msg.createdAt.toLocaleString()}] ${msg.author.tag}: ${msg.content}`
-                    ).join('\n');
+                    if (allMessages.length > 0) {
+                        const chatContent = allMessages.map(msg =>
+                            `[${msg.createdAt.toLocaleString()}] ${msg.author.tag}: ${msg.content}`
+                        ).join('\n');
 
-                    const buffer = Buffer.from(chatContent, 'utf-8');
+                        const buffer = Buffer.from(chatContent, 'utf-8');
 
-                    await chatlogChannel.send({
-                        embeds: [chatlogEmbed],
-                        files: [{
-                            attachment: buffer,
-                            name: `${ticketChannel.name}-chatlog.txt`
-                        }]
-                    });
-                } else {
-                    await chatlogChannel.send({ embeds: [chatlogEmbed] });
+                        await chatlogChannel.send({
+                            embeds: [chatlogEmbed],
+                            files: [{
+                                attachment: buffer,
+                                name: `${ticketChannel.name}-chatlog.txt`
+                            }]
+                        });
+                    } else {
+                        await chatlogChannel.send({ embeds: [chatlogEmbed] });
+                    }
                 }
+            } catch (chatlogError) {
+                console.error('Error with chatlog channel:', chatlogError);
             }
 
-            await interaction.reply({ content: 'Ticket is being closed...', ephemeral: true });
+            await interaction.editReply({ content: 'Ticket is being closed...' });
 
+            // Delete the ticket channel after a short delay
             setTimeout(async () => {
-                await ticketChannel.delete('Ticket closed');
+                try {
+                    await ticketChannel.delete('Ticket closed by ' + interaction.user.tag);
+                } catch (deleteError) {
+                    console.error('Error deleting channel:', deleteError);
+                }
             }, 1000);
 
         } catch (error) {
             console.error('Error closing ticket:', error);
-            await interaction.reply({ content: 'Error closing ticket.', ephemeral: true });
+            await interaction.editReply({ content: `Error closing ticket: ${error.message}` });
         }
     }
 });
