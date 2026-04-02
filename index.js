@@ -51,6 +51,19 @@ client.on('ready', async () => {
 
 client.on('guildMemberAdd', async (member) => {
     try {
+        // Assign Community role to new member
+        try {
+            const communityRole = member.guild.roles.cache.find(role => role.name === 'Community');
+            if (communityRole) {
+                await member.roles.add(communityRole);
+                console.log(`Assigned Community role to ${member.user.tag}`);
+            } else {
+                console.log('Community role not found in this guild');
+            }
+        } catch (roleError) {
+            console.error('Error assigning Community role:', roleError);
+        }
+
         // Send welcome message
         const welcomeChannel = await client.channels.fetch(welcomeChannelId);
         
