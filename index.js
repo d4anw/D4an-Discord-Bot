@@ -31,7 +31,6 @@ const client = new Client({
 client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
     
-    // Initialize invite counts on bot startup
     try {
         const guild = client.guilds.cache.first();
         if (guild) {
@@ -51,7 +50,6 @@ client.on('ready', async () => {
 
 client.on('guildMemberAdd', async (member) => {
     try {
-        // Assign Community role to new member
         try {
             const communityRole = member.guild.roles.cache.find(role => role.name === 'Community');
             if (communityRole) {
@@ -64,7 +62,6 @@ client.on('guildMemberAdd', async (member) => {
             console.error('Error assigning Community role:', roleError);
         }
 
-        // Send welcome message
         const welcomeChannel = await client.channels.fetch(welcomeChannelId);
         
         if (welcomeChannel) {
@@ -81,7 +78,6 @@ client.on('guildMemberAdd', async (member) => {
             });
         }
 
-        // Check who invited them
         const invites = await member.guild.invites.fetch();
         let inviter = null;
         let inviteCode = null;
@@ -98,7 +94,6 @@ client.on('guildMemberAdd', async (member) => {
             }
         }
 
-        // Send invite logging message
         if (inviter) {
             const inviteCount = userInvites.get(inviter.id) || 0;
             const invitesChannel = await client.channels.fetch(invitesChannelId);
@@ -126,6 +121,25 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 client.on('messageCreate', async (message) => {
+    if (message.content.startsWith('!invites')) {
+        const mentionedUser = message.mentions.users.first();
+        const targetUser = mentionedUser || message.author;
+
+        const inviteCount = userInvites.get(targetUser.id) || 0;
+
+        const embed = new EmbedBuilder()
+            .setTitle('📨 Invite Count')
+            .setDescription(mentionedUser
+                ? `<@${targetUser.id}> has **${inviteCount}** invite${inviteCount !== 1 ? 's' : ''}.`
+                : `You have **${inviteCount}** invite${inviteCount !== 1 ? 's' : ''}.`)
+            .setColor(0xFF9527)
+            .setThumbnail(targetUser.displayAvatarURL())
+            .setFooter({ text: `Requested by ${message.author.tag}` });
+
+        await message.channel.send({ embeds: [embed] });
+        return;
+    }
+
     if (message.content === '!ticketpanel') {
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -137,7 +151,7 @@ client.on('messageCreate', async (message) => {
         const embed = new EmbedBuilder()
             .setTitle('D4an Texture Tickets')
             .setDescription('Click the button below to receive assistance from our staff team with any issue.')
-            .setImage('https://media.discordapp.net/attachments/1488907627114135702/1488926655115169883/discordbanner.png?ex=69ce8e81&is=69cd3d01&hm=c248de3403985322e462c5bb473c5e308171a43292e9ffc39565ccf6274cf8e8&=&format=webp&quality=lossless&width=1027&height=560') // Replace with your image URL
+            .setImage('https://media.discordapp.net/attachments/1488907627114135702/1488926655115169883/discordbanner.png?ex=69ce8e81&is=69cd3d01&hm=c248de3403985322e462c5bb473c5e308171a43292e9ffc39565ccf6274cf8e8&=&format=webp&quality=lossless&width=1027&height=560')
             .setColor(0xFF9527)
             .setFooter({ text: 'Support Team' });
 
@@ -238,7 +252,6 @@ client.on('interactionCreate', async (interaction) => {
             let allMessages = [];
             let lastMessageId;
 
-            // Fetch all messages from the ticket channel
             while (true) {
                 try {
                     const options = { limit: 100 };
@@ -257,7 +270,6 @@ client.on('interactionCreate', async (interaction) => {
 
             allMessages.reverse();
 
-            // Send chatlog to chatlog channel if it exists
             try {
                 const chatlogChannel = await client.channels.fetch(chatlogChannelId);
 
@@ -302,7 +314,6 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.editReply({ content: 'Ticket is being closed...' });
 
-            // Delete the ticket channel after a short delay
             setTimeout(async () => {
                 try {
                     await ticketChannel.delete('Ticket closed by ' + interaction.user.tag);
