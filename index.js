@@ -296,8 +296,9 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
-    // ONLY ONE TICKET CREATION BLOCK NOW
     if (interaction.customId === 'create_ticket') {
+        await interaction.deferReply({ ephemeral: true });
+
         const guild = interaction.guild;
 
         const channel = await guild.channels.create({
@@ -362,7 +363,7 @@ client.on('interactionCreate', async (interaction) => {
             console.log("Log channel error:", e);
         }
 
-        await interaction.reply({ content: `Your ticket has been created: ${channel}`, ephemeral: true });
+        await interaction.editReply({ content: `Your ticket has been created: ${channel}` });
         return;
     }
 
