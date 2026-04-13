@@ -296,6 +296,7 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
+    // ONLY ONE TICKET CREATION BLOCK NOW
     if (interaction.customId === 'create_ticket') {
         const guild = interaction.guild;
 
@@ -316,7 +317,7 @@ client.on('interactionCreate', async (interaction) => {
                     ]
                 },
                 {
-                    id: "1490715225140494368",
+                    id: "1490715225140494368", // MOD ROLE
                     allow: [
                         PermissionsBitField.Flags.ViewChannel,
                         PermissionsBitField.Flags.SendMessages,
@@ -365,6 +366,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
+    // CLOSE TICKET
     if (interaction.customId.startsWith('close_ticket_')) {
         await interaction.deferReply({ ephemeral: true });
 
