@@ -14,7 +14,7 @@ const chatlogChannelId = "1488962511150649364";
 const welcomeChannelId = "1488858798356693165";
 const invitesChannelId = "1488858798356693167";
 
-// Map to store user invite counts: userId -> inviteCount
+// Map to store user invite counts: userId -> total invite uses across all links
 const userInvites = new Map();
 
 const client = new Client({
@@ -35,12 +35,15 @@ client.on('ready', async () => {
         const guild = client.guilds.cache.first();
         if (guild) {
             const invites = await guild.invites.fetch();
+
+            // Sum all uses across all links per user
             invites.forEach(invite => {
                 if (invite.inviter) {
                     const currentCount = userInvites.get(invite.inviter.id) || 0;
                     userInvites.set(invite.inviter.id, currentCount + invite.uses);
                 }
             });
+
             console.log('Invite counts initialized');
         }
     } catch (error) {
@@ -88,14 +91,18 @@ client.on('guildMemberAdd', async (member) => {
                 if (invite.uses > previousUses) {
                     inviter = invite.inviter;
                     inviteCode = invite.code;
-                    userInvites.set(inviter.id, invite.uses);
                     break;
                 }
             }
         }
 
         if (inviter) {
-            const inviteCount = userInvites.get(inviter.id) || 0;
+            // ✅ Fix: sum ALL invite links for this user instead of storing one link's uses
+            const totalUses = invites
+                .filter(inv => inv.inviter?.id === inviter.id)
+                .reduce((sum, inv) => sum + inv.uses, 0);
+            userInvites.set(inviter.id, totalUses);
+
             const invitesChannel = await client.channels.fetch(invitesChannelId);
 
             if (invitesChannel) {
@@ -105,7 +112,7 @@ client.on('guildMemberAdd', async (member) => {
                     .addFields(
                         { name: 'Inviter', value: inviter.tag, inline: true },
                         { name: 'New Member', value: member.user.tag, inline: true },
-                        { name: 'Total Invites', value: `${inviteCount}`, inline: true },
+                        { name: 'Total Invites', value: `${totalUses}`, inline: true },
                         { name: 'Invite Code', value: inviteCode || 'Unknown', inline: true },
                         { name: 'Joined At', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:f>` }
                     )
