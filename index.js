@@ -14,7 +14,7 @@ const chatlogChannelId = "1488962511150649364";
 const welcomeChannelId = "1488858798356693165";
 const invitesChannelId = "1488858798356693167";
 
-// Map to store user invite counts: userId -> total invite uses across all links
+// Permanent invite counter: userId -> total invites ever
 const userInvites = new Map();
 
 const client = new Client({
@@ -30,7 +30,7 @@ const client = new Client({
 
 client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
-    
+
     try {
         const guild = client.guilds.cache.first();
         if (guild) {
@@ -38,8 +38,8 @@ client.on('ready', async () => {
 
             invites.forEach(invite => {
                 if (invite.inviter) {
-                    const currentCount = userInvites.get(invite.inviter.id) || 0;
-                    userInvites.set(invite.inviter.id, currentCount + invite.uses);
+                    const current = userInvites.get(invite.inviter.id) || 0;
+                    userInvites.set(invite.inviter.id, current + invite.uses);
                 }
             });
 
@@ -52,20 +52,19 @@ client.on('ready', async () => {
 
 client.on('guildMemberAdd', async (member) => {
     try {
+        // Assign Community role
         try {
             const communityRole = member.guild.roles.cache.find(role => role.name === 'Community');
             if (communityRole) {
                 await member.roles.add(communityRole);
                 console.log(`Assigned Community role to ${member.user.tag}`);
-            } else {
-                console.log('Community role not found in this guild');
             }
         } catch (roleError) {
             console.error('Error assigning Community role:', roleError);
         }
 
+        // Welcome message
         const welcomeChannel = await client.channels.fetch(welcomeChannelId);
-        
         if (welcomeChannel) {
             const welcomeEmbed = new EmbedBuilder()
                 .setTitle(`Welcome to the server, ${member.user.username}!`)
@@ -80,6 +79,7 @@ client.on('guildMemberAdd', async (member) => {
             });
         }
 
+        // Detect inviter
         const invites = await member.guild.invites.fetch();
         let inviter = null;
         let inviteCode = null;
@@ -95,11 +95,11 @@ client.on('guildMemberAdd', async (member) => {
             }
         }
 
+        // Update permanent invite count
         if (inviter) {
-            const totalUses = invites
-                .filter(inv => inv.inviter?.id === inviter.id)
-                .reduce((sum, inv) => sum + inv.uses, 0);
-            userInvites.set(inviter.id, totalUses);
+            const previousTotal = userInvites.get(inviter.id) || 0;
+            const newTotal = previousTotal + 1;
+            userInvites.set(inviter.id, newTotal);
 
             const invitesChannel = await client.channels.fetch(invitesChannelId);
 
@@ -110,7 +110,7 @@ client.on('guildMemberAdd', async (member) => {
                     .addFields(
                         { name: 'Inviter', value: inviter.tag, inline: true },
                         { name: 'New Member', value: member.user.tag, inline: true },
-                        { name: 'Total Invites', value: `${totalUses}`, inline: true },
+                        { name: 'Total Invites', value: `${newTotal}`, inline: true },
                         { name: 'Invite Code', value: inviteCode || 'Unknown', inline: true },
                         { name: 'Joined At', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:f>` }
                     )
@@ -128,25 +128,22 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
+    // ---------------------------
+    // FIXED !invites command
+    // ---------------------------
     if (message.content.startsWith('!invites')) {
         const mentionedUser = message.mentions.users.first();
         const targetUser = mentionedUser || message.author;
 
-        let inviteCount = 0;
-        try {
-            const guildInvites = await message.guild.invites.fetch();
-            inviteCount = guildInvites
-                .filter(inv => inv.inviter?.id === targetUser.id)
-                .reduce((sum, inv) => sum + inv.uses, 0);
-        } catch (err) {
-            console.error('Error fetching invites:', err);
-        }
+        const inviteCount = userInvites.get(targetUser.id) || 0;
 
         const embed = new EmbedBuilder()
             .setTitle('📨 Invite Count')
-            .setDescription(mentionedUser
-                ? `<@${targetUser.id}> has **${inviteCount}** invite${inviteCount !== 1 ? 's' : ''}.`
-                : `You have **${inviteCount}** invite${inviteCount !== 1 ? 's' : ''}.`)
+            .setDescription(
+                mentionedUser
+                    ? `<@${targetUser.id}> has **${inviteCount}** invite${inviteCount !== 1 ? 's' : ''}.`
+                    : `You have **${inviteCount}** invite${inviteCount !== 1 ? 's' : ''}.`
+            )
             .setColor(0xFF9527)
             .setThumbnail(targetUser.displayAvatarURL())
             .setFooter({ text: `Requested by ${message.author.tag}` });
@@ -155,6 +152,36 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
+    // ---------------------------
+    // INVITE LEADERBOARD COMMAND
+    // ---------------------------
+    if (message.content === '!leaderboard') {
+        if (userInvites.size === 0) {
+            return message.channel.send("No invite data has been recorded yet.");
+        }
+
+        const sorted = [...userInvites.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10);
+
+        let description = sorted
+            .map(([userId, count], index) => {
+                const user = message.guild.members.cache.get(userId);
+                const tag = user ? user.user.tag : `Unknown User (${userId})`;
+                return `**${index + 1}.** ${tag} — **${count}** invites`;
+            })
+            .join('\n');
+
+        const embed = new EmbedBuilder()
+            .setTitle('🏆 Invite Leaderboard')
+            .setDescription(description)
+            .setColor(0xFFD700)
+            .setFooter({ text: `Requested by ${message.author.tag}` });
+
+        return message.channel.send({ embeds: [embed] });
+    }
+
+    // Ticket panel
     if (message.content === '!ticketpanel') {
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -166,7 +193,7 @@ client.on('messageCreate', async (message) => {
         const embed = new EmbedBuilder()
             .setTitle('D4an Texture Tickets')
             .setDescription('Click the button below to receive assistance from our staff team with any issue.')
-            .setImage('https://media.discordapp.net/attachments/1488907627114135702/1488926655115169883/discordbanner.png?ex=69ce8e81&is=69cd3d01&hm=c248de3403985322e462c5bb473c5e308171a43292e9ffc39565ccf6274cf8e8&=&format=webp&quality=lossless&width=1027&height=560')
+            .setImage('https://media.discordapp.net/attachments/1488907627114135702/1488926655115169883/discordbanner.png')
             .setColor(0xFF9527)
             .setFooter({ text: 'Support Team' });
 
@@ -177,6 +204,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// Ticket creation
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
@@ -241,6 +269,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// Ticket closing
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
@@ -248,7 +277,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply({ ephemeral: true });
 
         const ticketChannelId = interaction.customId.replace('close_ticket_', '');
-        
+
         let ticketChannel;
         try {
             ticketChannel = await client.channels.fetch(ticketChannelId);
@@ -344,7 +373,5 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// -------------------------------
-// LOGIN (MUST BE LAST)
-// -------------------------------
+// LOGIN
 client.login(process.env.TOKEN);
