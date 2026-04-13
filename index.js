@@ -17,20 +17,6 @@ const invitesChannelId = "1488858798356693167";
 
 const INVITE_FILE = './invites.json';
 
-// ----------------------
-// JSON STORAGE STRUCTURE
-// ----------------------
-// {
-//   "invites": {
-//      "CODE123": { "inviter": "userId", "uses": 5 },
-//      ...
-//   },
-//   "userTotals": {
-//      "userId": 12,
-//      ...
-//   }
-// }
-
 let store = {
     invites: {},
     userTotals: {}
@@ -62,7 +48,6 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
-// Active invite cache: code -> uses
 let activeInvites = new Map();
 
 client.on('ready', async () => {
@@ -85,7 +70,6 @@ client.on('ready', async () => {
                     uses: inv.uses || 0
                 };
             } else {
-                // keep inviter, but update uses to current
                 store.invites[inv.code].uses = inv.uses || 0;
             }
         });
@@ -97,7 +81,6 @@ client.on('ready', async () => {
     }
 });
 
-// Track new invites
 client.on('inviteCreate', invite => {
     activeInvites.set(invite.code, invite.uses);
 
@@ -114,10 +97,8 @@ client.on('inviteCreate', invite => {
     saveStore();
 });
 
-// Keep expired/deleted invites in JSON, but remove from active cache
 client.on('inviteDelete', invite => {
     activeInvites.delete(invite.code);
-    // Do NOT delete from store.invites – we want historical data
     saveStore();
 });
 
@@ -126,37 +107,26 @@ client.on('inviteDelete', invite => {
 // ----------------------
 client.on('guildMemberAdd', async (member) => {
     try {
-        // Assign Community role
-        try {
-            const communityRole = member.guild.roles.cache.find(r => r.name === 'Community');
-            if (communityRole) {
-                await member.roles.add(communityRole);
-            }
-        } catch (roleError) {
-            console.error('Error assigning Community role:', roleError);
+        const communityRole = member.guild.roles.cache.find(r => r.name === 'Community');
+        if (communityRole) {
+            await member.roles.add(communityRole);
         }
 
-        // Welcome message
-        try {
-            const welcomeChannel = await client.channels.fetch(welcomeChannelId);
-            if (welcomeChannel) {
-                const welcomeEmbed = new EmbedBuilder()
-                    .setTitle(`Welcome to the server, ${member.user.username}!`)
-                    .setDescription(`We're glad to have you here! 🎉\n\nFeel free to explore and don't hesitate to ask if you need help.`)
-                    .setColor(0xFF9527)
-                    .setThumbnail(member.user.displayAvatarURL())
-                    .setFooter({ text: `Member #${member.guild.memberCount}` });
+        const welcomeChannel = await client.channels.fetch(welcomeChannelId);
+        if (welcomeChannel) {
+            const welcomeEmbed = new EmbedBuilder()
+                .setTitle(`Welcome to the server, ${member.user.username}!`)
+                .setDescription(`We're glad to have you here! 🎉\n\nFeel free to explore and don't hesitate to ask if you need help.`)
+                .setColor(0xFF9527)
+                .setThumbnail(member.user.displayAvatarURL())
+                .setFooter({ text: `Member #${member.guild.memberCount}` });
 
-                await welcomeChannel.send({
-                    content: `<@${member.id}>`,
-                    embeds: [welcomeEmbed]
-                });
-            }
-        } catch (welcomeError) {
-            console.error('Error sending welcome message:', welcomeError);
+            await welcomeChannel.send({
+                content: `<@${member.id}>`,
+                embeds: [welcomeEmbed]
+            });
         }
 
-        // Detect which invite was used
         let usedInvite = null;
         try {
             const newInvites = await member.guild.invites.fetch();
@@ -168,7 +138,6 @@ client.on('guildMemberAdd', async (member) => {
                 }
             });
 
-            // Update active cache
             newInvites.forEach(inv => {
                 activeInvites.set(inv.code, inv.uses);
             });
@@ -183,7 +152,6 @@ client.on('guildMemberAdd', async (member) => {
             inviter = usedInvite.inviter || null;
             inviteCode = usedInvite.code;
 
-            // Ensure invite exists in store
             if (!store.invites[inviteCode]) {
                 store.invites[inviteCode] = {
                     inviter: inviter ? inviter.id : null,
@@ -191,10 +159,8 @@ client.on('guildMemberAdd', async (member) => {
                 };
             }
 
-            // Increment per-code uses by 1 (per join event)
             store.invites[inviteCode].uses += 1;
 
-            // Increment per-user total
             if (inviter) {
                 if (!store.userTotals[inviter.id]) {
                     store.userTotals[inviter.id] = 0;
@@ -204,34 +170,28 @@ client.on('guildMemberAdd', async (member) => {
 
             saveStore();
         } else {
-            // Joined via an invite that Discord no longer exposes (expired/deleted before join)
             inviteCode = 'Expired/Deleted';
         }
 
-        // Log invite usage
-        try {
-            const invitesChannel = await client.channels.fetch(invitesChannelId);
-            if (invitesChannel) {
-                const inviteEmbed = new EmbedBuilder()
-                    .setTitle('📊 Member Invited')
-                    .setDescription(
-                        inviter
-                            ? `<@${inviter.id}> invited <@${member.id}>`
-                            : `<@${member.id}> joined using an expired or deleted invite`
-                    )
-                    .addFields(
-                        { name: 'Inviter', value: inviter ? inviter.tag : 'Unknown', inline: true },
-                        { name: 'New Member', value: member.user.tag, inline: true },
-                        { name: 'Invite Code', value: inviteCode || 'Unknown', inline: true },
-                        { name: 'Joined At', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:f>` }
-                    )
-                    .setColor(0x0099ff)
-                    .setThumbnail(member.user.displayAvatarURL());
+        const invitesChannel = await client.channels.fetch(invitesChannelId);
+        if (invitesChannel) {
+            const inviteEmbed = new EmbedBuilder()
+                .setTitle('📊 Member Invited')
+                .setDescription(
+                    inviter
+                        ? `<@${inviter.id}> invited <@${member.id}>`
+                        : `<@${member.id}> joined using an expired or deleted invite`
+                )
+                .addFields(
+                    { name: 'Inviter', value: inviter ? inviter.tag : 'Unknown', inline: true },
+                    { name: 'New Member', value: member.user.tag, inline: true },
+                    { name: 'Invite Code', value: inviteCode || 'Unknown', inline: true },
+                    { name: 'Joined At', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:f>` }
+                )
+                .setColor(0x0099ff)
+                .setThumbnail(member.user.displayAvatarURL());
 
-                await invitesChannel.send({ embeds: [inviteEmbed] });
-            }
-        } catch (logError) {
-            console.error('Error sending invite log:', logError);
+            await invitesChannel.send({ embeds: [inviteEmbed] });
         }
 
     } catch (error) {
@@ -247,7 +207,6 @@ client.on('messageCreate', async (message) => {
 
     const content = message.content.trim();
 
-    // !invites
     if (content.startsWith('!invites')) {
         const mentionedUser = message.mentions.users.first();
         const targetUser = mentionedUser || message.author;
@@ -269,7 +228,6 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // !leaderboard
     if (content === '!leaderboard') {
         const entries = Object.entries(store.userTotals);
         if (entries.length === 0) {
@@ -281,7 +239,6 @@ client.on('messageCreate', async (message) => {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 10);
 
-        // Fetch missing members so we don't get "Unknown User"
         const lines = [];
         for (let i = 0; i < sorted.length; i++) {
             const [userId, count] = sorted[i];
@@ -295,9 +252,7 @@ client.on('messageCreate', async (message) => {
                     const user = await client.users.fetch(userId).catch(() => null);
                     if (user) tag = user.tag;
                 }
-            } catch {
-                // ignore, keep fallback
-            }
+            } catch {}
 
             lines.push(`**${i + 1}.** ${tag} — **${count}** invite${count !== 1 ? 's' : ''}`);
         }
@@ -312,7 +267,6 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // Ticket panel
     if (content === '!ticketpanel') {
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -342,7 +296,6 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
 
-    // Create ticket
     if (interaction.customId === 'create_ticket') {
         const guild = interaction.guild;
 
@@ -356,6 +309,14 @@ client.on('interactionCreate', async (interaction) => {
                 },
                 {
                     id: interaction.user.id,
+                    allow: [
+                        PermissionsBitField.Flags.ViewChannel,
+                        PermissionsBitField.Flags.SendMessages,
+                        PermissionsBitField.Flags.ReadMessageHistory
+                    ]
+                },
+                {
+                    id: "1490715225140494368",
                     allow: [
                         PermissionsBitField.Flags.ViewChannel,
                         PermissionsBitField.Flags.SendMessages,
@@ -404,7 +365,6 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
 
-    // Close ticket
     if (interaction.customId.startsWith('close_ticket_')) {
         await interaction.deferReply({ ephemeral: true });
 
@@ -500,5 +460,4 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// LOGIN
 client.login(process.env.TOKEN);
