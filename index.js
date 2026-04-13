@@ -36,7 +36,6 @@ client.on('ready', async () => {
         if (guild) {
             const invites = await guild.invites.fetch();
 
-            // Sum all uses across all links per user
             invites.forEach(invite => {
                 if (invite.inviter) {
                     const currentCount = userInvites.get(invite.inviter.id) || 0;
@@ -97,7 +96,6 @@ client.on('guildMemberAdd', async (member) => {
         }
 
         if (inviter) {
-            // ✅ Fix: sum ALL invite links for this user instead of storing one link's uses
             const totalUses = invites
                 .filter(inv => inv.inviter?.id === inviter.id)
                 .reduce((sum, inv) => sum + inv.uses, 0);
@@ -128,11 +126,21 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+
     if (message.content.startsWith('!invites')) {
         const mentionedUser = message.mentions.users.first();
         const targetUser = mentionedUser || message.author;
 
-        const inviteCount = userInvites.get(targetUser.id) || 0;
+        let inviteCount = 0;
+        try {
+            const guildInvites = await message.guild.invites.fetch();
+            inviteCount = guildInvites
+                .filter(inv => inv.inviter?.id === targetUser.id)
+                .reduce((sum, inv) => sum + inv.uses, 0);
+        } catch (err) {
+            console.error('Error fetching invites:', err);
+        }
 
         const embed = new EmbedBuilder()
             .setTitle('📨 Invite Count')
