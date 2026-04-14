@@ -17,7 +17,11 @@ const welcomeChannelId = "1488858798356693165";
 const invitesChannelId = "1488858798356693167";
 
 const INVITE_FILE = './invites.json';
+const WARNS_FILE = './warns.json';
 
+// ----------------------
+// STORE: INVITES
+// ----------------------
 let store = {
     invites: {},
     userTotals: {}
@@ -38,19 +42,51 @@ function saveStore() {
     fs.writeFileSync(INVITE_FILE, JSON.stringify(store, null, 4));
 }
 
+// ----------------------
+// STORE: WARNINGS
+// ----------------------
+let warnStore = {};
+
+if (fs.existsSync(WARNS_FILE)) {
+    try {
+        const raw = fs.readFileSync(WARNS_FILE, 'utf8');
+        warnStore = JSON.parse(raw);
+    } catch (e) {
+        console.error('Error reading warns.json, starting fresh:', e);
+    }
+}
+
+function saveWarns() {
+    fs.writeFileSync(WARNS_FILE, JSON.stringify(warnStore, null, 4));
+}
+
+// ----------------------
+// CLIENT
+// ----------------------
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildInvites
+        GatewayIntentBits.GuildInvites,
+        GatewayIntentBits.GuildModeration
     ],
     partials: [Partials.Channel]
 });
 
 let activeInvites = new Map();
 
+// ----------------------
+// HELPER: Check Permissions
+// ----------------------
+function hasPermission(member, flag) {
+    return member.permissions.has(flag);
+}
+
+// ----------------------
+// READY
+// ----------------------
 client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
@@ -92,6 +128,9 @@ client.on('ready', async () => {
     }
 });
 
+// ----------------------
+// INVITE EVENTS
+// ----------------------
 client.on('inviteCreate', invite => {
     activeInvites.set(invite.code, invite.uses);
 
@@ -114,7 +153,7 @@ client.on('inviteDelete', invite => {
 });
 
 // ----------------------
-// MEMBER JOIN / INVITES
+// MEMBER JOIN
 // ----------------------
 client.on('guildMemberAdd', async (member) => {
     try {
@@ -217,11 +256,15 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     const content = message.content.trim();
+    const args = content.split(/\s+/);
+    const command = args[0].toLowerCase();
 
-    if (content.startsWith('!invites')) {
+    // ----------------------
+    // INVITE COMMANDS
+    // ----------------------
+    if (command === '!invites') {
         const mentionedUser = message.mentions.users.first();
         const targetUser = mentionedUser || message.author;
-
         const totalInvites = store.userTotals[targetUser.id] || 0;
 
         const embed = new EmbedBuilder()
@@ -239,22 +282,19 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    if (content === '!leaderboard') {
+    if (command === '!leaderboard') {
         const entries = Object.entries(store.userTotals);
         if (entries.length === 0) {
             await message.channel.send('No invite data has been recorded yet.');
             return;
         }
 
-        const sorted = entries
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
-
+        const sorted = entries.sort((a, b) => b[1] - a[1]).slice(0, 10);
         const lines = [];
+
         for (let i = 0; i < sorted.length; i++) {
             const [userId, count] = sorted[i];
             let tag = `Unknown User (${userId})`;
-
             try {
                 const member = await message.guild.members.fetch(userId).catch(() => null);
                 if (member) {
@@ -264,7 +304,6 @@ client.on('messageCreate', async (message) => {
                     if (user) tag = user.tag;
                 }
             } catch {}
-
             lines.push(`**${i + 1}.** ${tag} — **${count}** invite${count !== 1 ? 's' : ''}`);
         }
 
@@ -278,7 +317,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    if (content === '!ticketpanel') {
+    if (command === '!ticketpanel') {
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('create_ticket')
@@ -293,13 +332,589 @@ client.on('messageCreate', async (message) => {
             .setColor(0xFF9527)
             .setFooter({ text: 'Support Team' });
 
-        await message.channel.send({
-            embeds: [embed],
-            components: [row]
+        await message.channel.send({ embeds: [embed], components: [row] });
+        return;
+    }
+
+    // ----------------------
+    // USERINFO
+    // ----------------------
+    if (command === '!userinfo') {
+        const mentionedUser = message.mentions.users.first();
+        let targetMember;
+
+        try {
+            if (mentionedUser) {
+                targetMember = await message.guild.members.fetch(mentionedUser.id);
+            } else {
+                targetMember = await message.guild.members.fetch(message.author.id);
+            }
+        } catch {
+            await message.channel.send('❌ Could not find that user.');
+            return;
+        }
+
+        const user = targetMember.user;
+        const roles = targetMember.roles.cache
+            .filter(r => r.id !== message.guild.id)
+            .sort((a, b) => b.position - a.position)
+            .map(r => `<@&${r.id}>`)
+            .slice(0, 10)
+            .join(', ') || 'None';
+
+        const warns = warnStore[user.id] || [];
+        const totalInvites = store.userTotals[user.id] || 0;
+
+        const embed = new EmbedBuilder()
+            .setTitle(`👤 User Info — ${user.tag}`)
+            .setThumbnail(user.displayAvatarURL({ dynamic: true, size: 256 }))
+            .addFields(
+                { name: '🆔 User ID', value: user.id, inline: true },
+                { name: '🤖 Bot', value: user.bot ? 'Yes' : 'No', inline: true },
+                { name: '📅 Account Created', value: `<t:${Math.floor(user.createdTimestamp / 1000)}:F>`, inline: false },
+                { name: '📥 Joined Server', value: `<t:${Math.floor(targetMember.joinedTimestamp / 1000)}:F>`, inline: false },
+                { name: '🎨 Nickname', value: targetMember.nickname || 'None', inline: true },
+                { name: '📨 Invites', value: `${totalInvites}`, inline: true },
+                { name: '⚠️ Warnings', value: `${warns.length}`, inline: true },
+                { name: `🎭 Roles (${targetMember.roles.cache.size - 1})`, value: roles, inline: false }
+            )
+            .setColor(targetMember.displayHexColor || 0xFF9527)
+            .setFooter({ text: `Requested by ${message.author.tag}` })
+            .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] });
+        return;
+    }
+
+    // ----------------------
+    // SERVERINFO
+    // ----------------------
+    if (command === '!serverinfo') {
+        const guild = message.guild;
+        await guild.fetch();
+
+        const totalMembers = guild.memberCount;
+        const onlineMembers = guild.members.cache.filter(m => m.presence?.status !== 'offline' && m.presence?.status !== undefined).size;
+        const botCount = guild.members.cache.filter(m => m.user.bot).size;
+        const humanCount = totalMembers - botCount;
+        const channelCount = guild.channels.cache.size;
+        const roleCount = guild.roles.cache.size - 1;
+        const emojiCount = guild.emojis.cache.size;
+        const boostCount = guild.premiumSubscriptionCount || 0;
+        const boostTier = guild.premiumTier || 0;
+
+        const verificationLevels = {
+            0: 'None',
+            1: 'Low',
+            2: 'Medium',
+            3: 'High',
+            4: 'Very High'
+        };
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🏠 Server Info — ${guild.name}`)
+            .setThumbnail(guild.iconURL({ dynamic: true, size: 256 }))
+            .addFields(
+                { name: '🆔 Server ID', value: guild.id, inline: true },
+                { name: '👑 Owner', value: `<@${guild.ownerId}>`, inline: true },
+                { name: '📅 Created', value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:F>`, inline: false },
+                { name: '👥 Members', value: `Total: **${totalMembers}**\nHumans: **${humanCount}**\nBots: **${botCount}**`, inline: true },
+                { name: '💬 Channels', value: `${channelCount}`, inline: true },
+                { name: '🎭 Roles', value: `${roleCount}`, inline: true },
+                { name: '😄 Emojis', value: `${emojiCount}`, inline: true },
+                { name: '🚀 Boosts', value: `${boostCount} (Tier ${boostTier})`, inline: true },
+                { name: '🔒 Verification', value: verificationLevels[guild.verificationLevel] || 'Unknown', inline: true }
+            )
+            .setColor(0xFF9527)
+            .setFooter({ text: `Requested by ${message.author.tag}` })
+            .setTimestamp();
+
+        if (guild.bannerURL()) {
+            embed.setImage(guild.bannerURL({ size: 1024 }));
+        }
+
+        await message.channel.send({ embeds: [embed] });
+        return;
+    }
+
+    // ----------------------
+    // BAN
+    // ----------------------
+    if (command === '!ban') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.BanMembers)) {
+            return message.channel.send('❌ You don\'t have permission to ban members.');
+        }
+
+        const target = message.mentions.members.first();
+        if (!target) return message.channel.send('❌ Please mention a user to ban. Usage: `!ban @user [reason]`');
+
+        if (!target.bannable) {
+            return message.channel.send('❌ I cannot ban this user. They may have a higher role than me.');
+        }
+
+        const reason = args.slice(2).join(' ') || 'No reason provided';
+
+        try {
+            await target.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('🔨 You have been banned')
+                        .setDescription(`You were banned from **${message.guild.name}**`)
+                        .addFields({ name: 'Reason', value: reason })
+                        .setColor(0xff0000)
+                        .setTimestamp()
+                ]
+            }).catch(() => {});
+
+            await target.ban({ reason: `${message.author.tag}: ${reason}` });
+
+            const embed = new EmbedBuilder()
+                .setTitle('🔨 Member Banned')
+                .addFields(
+                    { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+                    { name: 'Moderator', value: message.author.tag, inline: true },
+                    { name: 'Reason', value: reason }
+                )
+                .setColor(0xff0000)
+                .setThumbnail(target.user.displayAvatarURL())
+                .setTimestamp();
+
+            await message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            console.error('Ban error:', err);
+            message.channel.send('❌ Failed to ban the user.');
+        }
+        return;
+    }
+
+    // ----------------------
+    // KICK
+    // ----------------------
+    if (command === '!kick') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.KickMembers)) {
+            return message.channel.send('❌ You don\'t have permission to kick members.');
+        }
+
+        const target = message.mentions.members.first();
+        if (!target) return message.channel.send('❌ Please mention a user to kick. Usage: `!kick @user [reason]`');
+
+        if (!target.kickable) {
+            return message.channel.send('❌ I cannot kick this user. They may have a higher role than me.');
+        }
+
+        const reason = args.slice(2).join(' ') || 'No reason provided';
+
+        try {
+            await target.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('👢 You have been kicked')
+                        .setDescription(`You were kicked from **${message.guild.name}**`)
+                        .addFields({ name: 'Reason', value: reason })
+                        .setColor(0xff8800)
+                        .setTimestamp()
+                ]
+            }).catch(() => {});
+
+            await target.kick(`${message.author.tag}: ${reason}`);
+
+            const embed = new EmbedBuilder()
+                .setTitle('👢 Member Kicked')
+                .addFields(
+                    { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+                    { name: 'Moderator', value: message.author.tag, inline: true },
+                    { name: 'Reason', value: reason }
+                )
+                .setColor(0xff8800)
+                .setThumbnail(target.user.displayAvatarURL())
+                .setTimestamp();
+
+            await message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            console.error('Kick error:', err);
+            message.channel.send('❌ Failed to kick the user.');
+        }
+        return;
+    }
+
+    // ----------------------
+    // TIMEOUT / MUTE
+    // ----------------------
+    if (command === '!timeout' || command === '!mute') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.ModerateMembers)) {
+            return message.channel.send('❌ You don\'t have permission to timeout members.');
+        }
+
+        const target = message.mentions.members.first();
+        if (!target) return message.channel.send('❌ Please mention a user. Usage: `!timeout @user <duration> [reason]`\nDuration examples: `10m`, `1h`, `1d`');
+
+        const durationStr = args[2];
+        if (!durationStr) return message.channel.send('❌ Please provide a duration. Examples: `10m`, `1h`, `2d`');
+
+        const durationMs = parseDuration(durationStr);
+        if (!durationMs) return message.channel.send('❌ Invalid duration format. Use `10m`, `1h`, `2d`, etc.');
+
+        const maxTimeout = 28 * 24 * 60 * 60 * 1000;
+        if (durationMs > maxTimeout) return message.channel.send('❌ Timeout cannot exceed 28 days.');
+
+        const reason = args.slice(3).join(' ') || 'No reason provided';
+
+        try {
+            await target.timeout(durationMs, `${message.author.tag}: ${reason}`);
+
+            await target.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('🔇 You have been timed out')
+                        .setDescription(`You were timed out in **${message.guild.name}**`)
+                        .addFields(
+                            { name: 'Duration', value: durationStr },
+                            { name: 'Reason', value: reason }
+                        )
+                        .setColor(0xffcc00)
+                        .setTimestamp()
+                ]
+            }).catch(() => {});
+
+            const embed = new EmbedBuilder()
+                .setTitle('🔇 Member Timed Out')
+                .addFields(
+                    { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+                    { name: 'Moderator', value: message.author.tag, inline: true },
+                    { name: 'Duration', value: durationStr, inline: true },
+                    { name: 'Reason', value: reason }
+                )
+                .setColor(0xffcc00)
+                .setThumbnail(target.user.displayAvatarURL())
+                .setTimestamp();
+
+            await message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            console.error('Timeout error:', err);
+            message.channel.send('❌ Failed to timeout the user.');
+        }
+        return;
+    }
+
+    // ----------------------
+    // UNTIMEOUT / UNMUTE
+    // ----------------------
+    if (command === '!untimeout' || command === '!unmute') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.ModerateMembers)) {
+            return message.channel.send('❌ You don\'t have permission to remove timeouts.');
+        }
+
+        const target = message.mentions.members.first();
+        if (!target) return message.channel.send('❌ Please mention a user to untimeout.');
+
+        try {
+            await target.timeout(null);
+
+            const embed = new EmbedBuilder()
+                .setTitle('🔊 Timeout Removed')
+                .addFields(
+                    { name: 'User', value: `${target.user.tag} (${target.id})`, inline: true },
+                    { name: 'Moderator', value: message.author.tag, inline: true }
+                )
+                .setColor(0x00cc44)
+                .setThumbnail(target.user.displayAvatarURL())
+                .setTimestamp();
+
+            await message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            console.error('Untimeout error:', err);
+            message.channel.send('❌ Failed to remove timeout.');
+        }
+        return;
+    }
+
+    // ----------------------
+    // WARN
+    // ----------------------
+    if (command === '!warn') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.ModerateMembers)) {
+            return message.channel.send('❌ You don\'t have permission to warn members.');
+        }
+
+        const target = message.mentions.members.first();
+        if (!target) return message.channel.send('❌ Please mention a user to warn. Usage: `!warn @user [reason]`');
+
+        const reason = args.slice(2).join(' ') || 'No reason provided';
+        const userId = target.user.id;
+
+        if (!warnStore[userId]) warnStore[userId] = [];
+
+        warnStore[userId].push({
+            reason,
+            moderator: message.author.tag,
+            timestamp: Date.now()
         });
+
+        saveWarns();
+
+        const warnCount = warnStore[userId].length;
+
+        await target.send({
+            embeds: [
+                new EmbedBuilder()
+                    .setTitle('⚠️ You have been warned')
+                    .setDescription(`You received a warning in **${message.guild.name}**`)
+                    .addFields(
+                        { name: 'Reason', value: reason },
+                        { name: 'Total Warnings', value: `${warnCount}` }
+                    )
+                    .setColor(0xffcc00)
+                    .setTimestamp()
+            ]
+        }).catch(() => {});
+
+        const embed = new EmbedBuilder()
+            .setTitle('⚠️ Member Warned')
+            .addFields(
+                { name: 'User', value: `${target.user.tag} (${userId})`, inline: true },
+                { name: 'Moderator', value: message.author.tag, inline: true },
+                { name: 'Reason', value: reason, inline: false },
+                { name: 'Total Warnings', value: `${warnCount}`, inline: true }
+            )
+            .setColor(0xffcc00)
+            .setThumbnail(target.user.displayAvatarURL())
+            .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] });
+
+        // Auto-punish thresholds
+        if (warnCount === 3) {
+            await target.timeout(30 * 60 * 1000, 'Auto-timeout: 3 warnings').catch(() => {});
+            await message.channel.send(`⚠️ **${target.user.tag}** has reached **3 warnings** and has been automatically timed out for **30 minutes**.`);
+        } else if (warnCount === 5) {
+            await target.timeout(24 * 60 * 60 * 1000, 'Auto-timeout: 5 warnings').catch(() => {});
+            await message.channel.send(`⚠️ **${target.user.tag}** has reached **5 warnings** and has been automatically timed out for **24 hours**.`);
+        } else if (warnCount >= 7) {
+            await target.ban({ reason: 'Auto-ban: 7+ warnings' }).catch(() => {});
+            await message.channel.send(`🔨 **${target.user.tag}** has reached **${warnCount} warnings** and has been automatically **banned**.`);
+        }
+
+        return;
+    }
+
+    // ----------------------
+    // WARNINGS LIST
+    // ----------------------
+    if (command === '!warnings' || command === '!warns') {
+        const target = message.mentions.users.first() || message.author;
+        const warns = warnStore[target.id] || [];
+
+        if (warns.length === 0) {
+            const embed = new EmbedBuilder()
+                .setTitle(`⚠️ Warnings — ${target.tag}`)
+                .setDescription('This user has no warnings.')
+                .setColor(0x00cc44)
+                .setThumbnail(target.displayAvatarURL());
+            return message.channel.send({ embeds: [embed] });
+        }
+
+        const warnLines = warns.map((w, i) =>
+            `**#${i + 1}** — ${w.reason}\n> Mod: ${w.moderator} • <t:${Math.floor(w.timestamp / 1000)}:R>`
+        ).join('\n\n');
+
+        const embed = new EmbedBuilder()
+            .setTitle(`⚠️ Warnings — ${target.tag}`)
+            .setDescription(warnLines)
+            .setColor(0xffcc00)
+            .setFooter({ text: `Total: ${warns.length} warning${warns.length !== 1 ? 's' : ''}` })
+            .setThumbnail(target.displayAvatarURL());
+
+        await message.channel.send({ embeds: [embed] });
+        return;
+    }
+
+    // ----------------------
+    // CLEAR WARNINGS
+    // ----------------------
+    if (command === '!clearwarnings' || command === '!clearwarns') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.ModerateMembers)) {
+            return message.channel.send('❌ You don\'t have permission to clear warnings.');
+        }
+
+        const target = message.mentions.users.first();
+        if (!target) return message.channel.send('❌ Please mention a user. Usage: `!clearwarnings @user`');
+
+        warnStore[target.id] = [];
+        saveWarns();
+
+        const embed = new EmbedBuilder()
+            .setTitle('✅ Warnings Cleared')
+            .setDescription(`All warnings for **${target.tag}** have been cleared.`)
+            .addFields({ name: 'Moderator', value: message.author.tag, inline: true })
+            .setColor(0x00cc44)
+            .setThumbnail(target.displayAvatarURL())
+            .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] });
+        return;
+    }
+
+    // ----------------------
+    // PURGE
+    // ----------------------
+    if (command === '!purge') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.ManageMessages)) {
+            return message.channel.send('❌ You don\'t have permission to delete messages.');
+        }
+
+        const amount = parseInt(args[1]);
+        if (isNaN(amount) || amount < 1 || amount > 100) {
+            return message.channel.send('❌ Please provide a number between 1 and 100. Usage: `!purge <amount>`');
+        }
+
+        try {
+            await message.delete();
+            const deleted = await message.channel.bulkDelete(amount, true);
+
+            const reply = await message.channel.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(`🗑️ Deleted **${deleted.size}** message${deleted.size !== 1 ? 's' : ''}.`)
+                        .setColor(0xff0000)
+                ]
+            });
+
+            setTimeout(() => reply.delete().catch(() => {}), 4000);
+        } catch (err) {
+            console.error('Purge error:', err);
+            message.channel.send('❌ Failed to delete messages. Messages older than 14 days cannot be bulk deleted.');
+        }
+        return;
+    }
+
+    // ----------------------
+    // UNBAN
+    // ----------------------
+    if (command === '!unban') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.BanMembers)) {
+            return message.channel.send('❌ You don\'t have permission to unban members.');
+        }
+
+        const userId = args[1];
+        if (!userId) return message.channel.send('❌ Please provide a user ID. Usage: `!unban <userID>`');
+
+        try {
+            await message.guild.members.unban(userId);
+
+            const embed = new EmbedBuilder()
+                .setTitle('✅ Member Unbanned')
+                .addFields(
+                    { name: 'User ID', value: userId, inline: true },
+                    { name: 'Moderator', value: message.author.tag, inline: true }
+                )
+                .setColor(0x00cc44)
+                .setTimestamp();
+
+            await message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            console.error('Unban error:', err);
+            message.channel.send('❌ Failed to unban. Make sure the user ID is correct and the user is actually banned.');
+        }
+        return;
+    }
+
+    // ----------------------
+    // SLOWMODE
+    // ----------------------
+    if (command === '!slowmode') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.ManageChannels)) {
+            return message.channel.send('❌ You don\'t have permission to manage channels.');
+        }
+
+        const seconds = parseInt(args[1]);
+        if (isNaN(seconds) || seconds < 0 || seconds > 21600) {
+            return message.channel.send('❌ Please provide a number between 0 and 21600 seconds. Usage: `!slowmode <seconds>`');
+        }
+
+        try {
+            await message.channel.setRateLimitPerUser(seconds);
+            const embed = new EmbedBuilder()
+                .setDescription(seconds === 0
+                    ? '✅ Slowmode has been **disabled** in this channel.'
+                    : `✅ Slowmode set to **${seconds} second${seconds !== 1 ? 's' : ''}** in this channel.`
+                )
+                .setColor(0x00cc44);
+
+            await message.channel.send({ embeds: [embed] });
+        } catch (err) {
+            console.error('Slowmode error:', err);
+            message.channel.send('❌ Failed to set slowmode.');
+        }
+        return;
+    }
+
+    // ----------------------
+    // HELP
+    // ----------------------
+    if (command === '!help') {
+        const embed = new EmbedBuilder()
+            .setTitle('📖 Bot Commands')
+            .setColor(0xFF9527)
+            .addFields(
+                {
+                    name: '🎫 Tickets',
+                    value: '`!ticketpanel` — Post the ticket creation panel'
+                },
+                {
+                    name: '📨 Invites',
+                    value: '`!invites [@user]` — Check invite count\n`!leaderboard` — Top 10 inviters'
+                },
+                {
+                    name: '📊 Info',
+                    value: '`!userinfo [@user]` — View user info\n`!serverinfo` — View server info'
+                },
+                {
+                    name: '🔨 Moderation',
+                    value: [
+                        '`!ban @user [reason]` — Ban a member',
+                        '`!unban <userID>` — Unban a member',
+                        '`!kick @user [reason]` — Kick a member',
+                        '`!timeout @user <duration> [reason]` — Timeout a member',
+                        '`!untimeout @user` — Remove timeout',
+                        '`!warn @user [reason]` — Warn a member',
+                        '`!warnings [@user]` — View warnings',
+                        '`!clearwarnings @user` — Clear all warnings',
+                        '`!purge <1-100>` — Bulk delete messages',
+                        '`!slowmode <seconds>` — Set channel slowmode'
+                    ].join('\n')
+                },
+                {
+                    name: '⚠️ Auto-Punishment',
+                    value: '3 warns → 30m timeout\n5 warns → 24h timeout\n7+ warns → Ban'
+                }
+            )
+            .setFooter({ text: `Requested by ${message.author.tag}` })
+            .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] });
         return;
     }
 });
+
+// ----------------------
+// DURATION PARSER
+// ----------------------
+function parseDuration(str) {
+    const match = str.match(/^(\d+)(s|m|h|d)$/i);
+    if (!match) return null;
+
+    const value = parseInt(match[1]);
+    const unit = match[2].toLowerCase();
+
+    const multipliers = {
+        s: 1000,
+        m: 60 * 1000,
+        h: 60 * 60 * 1000,
+        d: 24 * 60 * 60 * 1000
+    };
+
+    return value * multipliers[unit];
+}
 
 // ----------------------
 // INTERACTIONS (TICKETS)
