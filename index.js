@@ -6,7 +6,8 @@ const {
     ButtonBuilder,
     ButtonStyle,
     PermissionsBitField,
-    EmbedBuilder
+    EmbedBuilder,
+    ActivityType
 } = require('discord.js');
 const fs = require('fs');
 
@@ -52,6 +53,16 @@ let activeInvites = new Map();
 
 client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
+
+    client.user.setPresence({
+        activities: [
+            {
+                name: 'discord.gg/d4antxt',
+                type: ActivityType.Watching
+            }
+        ],
+        status: 'online'
+    });
 
     const guild = client.guilds.cache.first();
     if (!guild) {
