@@ -878,7 +878,11 @@ client.on('messageCreate', async (message) => {
     // ADD EMOJI
     // ----------------------
     if (command === '!add') {
-        if (!hasPermission(message.member, PermissionsBitField.Flags.ManageGuildExpressions)) {
+        // Check if user has permission OR has Helper role
+        const hasHelperRole = message.member.roles.cache.some(r => r.name === 'Helper');
+        const hasPermission = message.member.permissions.has(PermissionsBitField.Flags.ManageGuildExpressions);
+
+        if (!hasPermission && !hasHelperRole) {
             return message.channel.send('❌ You don\'t have permission to manage emojis.');
         }
 
@@ -920,6 +924,7 @@ client.on('messageCreate', async (message) => {
                         .setTimestamp();
 
                     await message.channel.send({ embeds: [embed] });
+                    return;
                 } catch (emojiCreateErr) {
                     console.error('Emoji creation error:', emojiCreateErr);
                     
@@ -932,15 +937,17 @@ client.on('messageCreate', async (message) => {
                     } else {
                         message.channel.send(`❌ Failed to add emoji: ${emojiCreateErr.message}`);
                     }
+                    return;
                 }
             } else {
                 await message.channel.send('❌ Invalid emoji format!\n\nUsage: `!add <emoji>`\n\nTo copy an emoji:\n1. React with the emoji on a message\n2. Copy the emoji text\n3. Use `!add <emoji>`');
+                return;
             }
         } catch (err) {
             console.error('Add emoji error:', err);
             message.channel.send('❌ An error occurred while processing your request.');
+            return;
         }
-        return;
     }
 
     // ----------------------
