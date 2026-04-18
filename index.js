@@ -849,6 +849,64 @@ client.on('messageCreate', async (message) => {
     }
 
     // ----------------------
+    // ADD EMOJI
+    // ----------------------
+    if (command === '!add') {
+        if (!hasPermission(message.member, PermissionsBitField.Flags.ManageGuildExpressions)) {
+            return message.channel.send('❌ You don\'t have permission to manage emojis.');
+        }
+
+        const emojiArg = args[1];
+        if (!emojiArg) return message.channel.send('❌ Please provide an emoji. Usage: `!add <emoji>`');
+
+        try {
+            // Check if it's a custom emoji
+            const customEmojiRegex = /<a?:(\w+):(\d+)>/;
+            const match = emojiArg.match(customEmojiRegex);
+
+            if (match) {
+                const emojiName = match[1];
+                const emojiId = match[2];
+                const isAnimated = emojiArg.startsWith('<a:');
+                
+                // Build the emoji URL
+                const format = isAnimated ? 'gif' : 'png';
+                const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.${format}`;
+
+                // Download the emoji and create it
+                const createdEmoji = await message.guild.emojis.create(emojiUrl, emojiName);
+
+                const embed = new EmbedBuilder()
+                    .setTitle('✅ Emoji Added')
+                    .setDescription(`Successfully added **${createdEmoji}** to the server!`)
+                    .addFields(
+                        { name: 'Emoji Name', value: emojiName, inline: true },
+                        { name: 'Added By', value: message.author.tag, inline: true }
+                    )
+                    .setColor(0x00cc44)
+                    .setThumbnail(emojiUrl)
+                    .setTimestamp();
+
+                await message.channel.send({ embeds: [embed] });
+            } else {
+                await message.channel.send('❌ Please provide a valid custom emoji. Usage: `!add <emoji>`');
+            }
+        } catch (err) {
+            console.error('Add emoji error:', err);
+            
+            let errorMsg = '❌ Failed to add emoji.';
+            if (err.message.includes('Maximum number')) {
+                errorMsg = '❌ Server has reached maximum emoji limit.';
+            } else if (err.message.includes('Invalid')) {
+                errorMsg = '❌ Invalid emoji provided.';
+            }
+            
+            message.channel.send(errorMsg);
+        }
+        return;
+    }
+
+    // ----------------------
     // HELP
     // ----------------------
     if (command === '!help') {
@@ -867,6 +925,10 @@ client.on('messageCreate', async (message) => {
                 {
                     name: '📊 Info',
                     value: '`!userinfo [@user]` — View user info\n`!serverinfo` — View server info'
+                },
+                {
+                    name: '😄 Emojis',
+                    value: '`!add <emoji>` — Add a custom emoji to the server'
                 },
                 {
                     name: '🔨 Moderation',
