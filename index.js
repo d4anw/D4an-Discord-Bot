@@ -91,10 +91,20 @@ function hasPermission(member, flag) {
 function downloadEmoji(url) {
     return new Promise((resolve, reject) => {
         https.get(url, (res) => {
+            if (res.statusCode !== 200) {
+                reject(new Error(`Failed to download emoji: HTTP ${res.statusCode}`));
+                return;
+            }
+
             const chunks = [];
             res.on('data', (chunk) => chunks.push(chunk));
             res.on('end', () => {
-                resolve(Buffer.concat(chunks));
+                const buffer = Buffer.concat(chunks);
+                if (buffer.length === 0) {
+                    reject(new Error('Downloaded emoji is empty'));
+                } else {
+                    resolve(buffer);
+                }
             });
         }).on('error', reject);
     });
@@ -890,9 +900,14 @@ client.on('messageCreate', async (message) => {
                 const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.${format}`;
 
                 try {
-                    // Download emoji and create it
+                    // Download emoji
                     const emojiBuffer = await downloadEmoji(emojiUrl);
-                    const createdEmoji = await message.guild.emojis.create(emojiBuffer, emojiName);
+                    
+                    // Create emoji with the buffer
+                    const createdEmoji = await message.guild.emojis.create({
+                        attachment: emojiBuffer,
+                        name: emojiName
+                    });
 
                     const embed = new EmbedBuilder()
                         .setTitle('✅ Emoji Added')
@@ -906,12 +921,14 @@ client.on('messageCreate', async (message) => {
 
                     await message.channel.send({ embeds: [embed] });
                 } catch (emojiCreateErr) {
-                    console.error('Emoji creation error:', emojiCreateErr.message);
+                    console.error('Emoji creation error:', emojiCreateErr);
                     
                     if (emojiCreateErr.message.includes('Maximum number')) {
                         message.channel.send('❌ Your server has reached the maximum emoji limit!');
                     } else if (emojiCreateErr.message.includes('Invalid')) {
                         message.channel.send('❌ Invalid emoji format.');
+                    } else if (emojiCreateErr.message.includes('Failed to download')) {
+                        message.channel.send('❌ Could not download the emoji. Make sure it\'s a valid custom emoji.');
                     } else {
                         message.channel.send(`❌ Failed to add emoji: ${emojiCreateErr.message}`);
                     }
