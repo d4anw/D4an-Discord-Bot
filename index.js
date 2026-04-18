@@ -10,6 +10,7 @@ const {
     ActivityType
 } = require('discord.js');
 const fs = require('fs');
+const https = require('https');
 
 const ticketLogChannelId = "1488962491818967301";
 const chatlogChannelId = "1488962511150649364";
@@ -82,6 +83,21 @@ let activeInvites = new Map();
 // ----------------------
 function hasPermission(member, flag) {
     return member.permissions.has(flag);
+}
+
+// ----------------------
+// HELPER: Download Emoji
+// ----------------------
+function downloadEmoji(url) {
+    return new Promise((resolve, reject) => {
+        https.get(url, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+                resolve(Buffer.concat(chunks));
+            });
+        }).on('error', reject);
+    });
 }
 
 // ----------------------
@@ -874,8 +890,9 @@ client.on('messageCreate', async (message) => {
                 const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.${format}`;
 
                 try {
-                    // Create the emoji directly from URL
-                    const createdEmoji = await message.guild.emojis.create(emojiUrl, emojiName);
+                    // Download emoji and create it
+                    const emojiBuffer = await downloadEmoji(emojiUrl);
+                    const createdEmoji = await message.guild.emojis.create(emojiBuffer, emojiName);
 
                     const embed = new EmbedBuilder()
                         .setTitle('✅ Emoji Added')
