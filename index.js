@@ -10,6 +10,8 @@ const {
     ActivityType
 } = require('discord.js');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 
 const ticketLogChannelId = "1488962491818967301";
 const chatlogChannelId = "1488962511150649364";
@@ -82,6 +84,19 @@ let activeInvites = new Map();
 // ----------------------
 function hasPermission(member, flag) {
     return member.permissions.has(flag);
+}
+
+// ----------------------
+// HELPER: Download Emoji from URL
+// ----------------------
+function downloadEmojiBuffer(url) {
+    return new Promise((resolve, reject) => {
+        https.get(url, (res) => {
+            const chunks = [];
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => resolve(Buffer.concat(chunks)));
+        }).on('error', reject);
+    });
 }
 
 // ----------------------
@@ -860,7 +875,7 @@ client.on('messageCreate', async (message) => {
         if (!emojiArg) return message.channel.send('❌ Please provide an emoji. Usage: `!add <emoji>`');
 
         try {
-            // Check if it's a custom emoji
+            // Check if it's a custom emoji format: <:name:id> or <a:name:id>
             const customEmojiRegex = /<a?:(\w+):(\d+)>/;
             const match = emojiArg.match(customEmojiRegex);
 
@@ -873,35 +888,43 @@ client.on('messageCreate', async (message) => {
                 const format = isAnimated ? 'gif' : 'png';
                 const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.${format}`;
 
-                // Download the emoji and create it
-                const createdEmoji = await message.guild.emojis.create(emojiUrl, emojiName);
+                try {
+                    // Download the emoji as a buffer
+                    const buffer = await downloadEmojiBuffer(emojiUrl);
 
-                const embed = new EmbedBuilder()
-                    .setTitle('✅ Emoji Added')
-                    .setDescription(`Successfully added **${createdEmoji}** to the server!`)
-                    .addFields(
-                        { name: 'Emoji Name', value: emojiName, inline: true },
-                        { name: 'Added By', value: message.author.tag, inline: true }
-                    )
-                    .setColor(0x00cc44)
-                    .setThumbnail(emojiUrl)
-                    .setTimestamp();
+                    // Create the emoji with the buffer
+                    const createdEmoji = await message.guild.emojis.create(buffer, emojiName);
 
-                await message.channel.send({ embeds: [embed] });
+                    const embed = new EmbedBuilder()
+                        .setTitle('✅ Emoji Added')
+                        .setDescription(`Successfully added ${createdEmoji} to the server!`)
+                        .addFields(
+                            { name: 'Emoji Name', value: emojiName, inline: true },
+                            { name: 'Added By', value: message.author.tag, inline: true }
+                        )
+                        .setColor(0x00cc44)
+                        .setTimestamp();
+
+                    await message.channel.send({ embeds: [embed] });
+                } catch (emojiCreateErr) {
+                    console.error('Emoji creation error:', emojiCreateErr.message);
+                    
+                    if (emojiCreateErr.message.includes('Maximum number')) {
+                        message.channel.send('❌ Your server has reached the maximum emoji limit!');
+                    } else if (emojiCreateErr.message.includes('Invalid')) {
+                        message.channel.send('❌ Invalid emoji format.');
+                    } else if (emojiCreateErr.message.includes('ENOTFOUND') || emojiCreateErr.message.includes('getaddrinfo')) {
+                        message.channel.send('❌ Could not download the emoji. Make sure it\'s a valid custom emoji.');
+                    } else {
+                        message.channel.send(`❌ Failed to add emoji: ${emojiCreateErr.message}`);
+                    }
+                }
             } else {
-                await message.channel.send('❌ Please provide a valid custom emoji. Usage: `!add <emoji>`');
+                await message.channel.send('❌ Invalid emoji format!\n\nUsage: `!add <emoji>`\n\nTo copy an emoji from another server:\n1. React with the emoji on any message\n2. Copy the emoji (right-click → Copy Emoji)\n3. Use `!add <emoji>`');
             }
         } catch (err) {
             console.error('Add emoji error:', err);
-            
-            let errorMsg = '❌ Failed to add emoji.';
-            if (err.message.includes('Maximum number')) {
-                errorMsg = '❌ Server has reached maximum emoji limit.';
-            } else if (err.message.includes('Invalid')) {
-                errorMsg = '❌ Invalid emoji provided.';
-            }
-            
-            message.channel.send(errorMsg);
+            message.channel.send('❌ An error occurred while processing your request.');
         }
         return;
     }
