@@ -347,6 +347,11 @@ client.on('guildMemberAdd', async (member) => {
 // ----------------------
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+
+    const messageLockName = `message_${message.id}`;
+    if (!acquireLock(messageLockName, 120000)) return;
+    setTimeout(() => releaseLock(messageLockName), 120000);
+
     if (processedMessages.has(message.id)) return;
     processedMessages.add(message.id);
     setTimeout(() => processedMessages.delete(message.id), 5000);
