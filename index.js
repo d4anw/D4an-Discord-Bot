@@ -177,6 +177,24 @@ async function hasRecentTourwinMessage(channel, userMention, imageLink, botUserI
     });
 }
 
+async function pruneRecentBotEmbeds(channel, matcher, keepNewest = true) {
+    const recent = await channel.messages.fetch({ limit: 20 });
+    const matches = recent
+        .filter((msg) => msg.author.id === client.user.id && matcher(msg))
+        .sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+    if (matches.size <= 1) return;
+
+    const arr = Array.from(matches.values());
+    const toDelete = keepNewest ? arr.slice(0, -1) : arr.slice(1);
+
+    for (const msg of toDelete) {
+        if (msg.deletable) {
+            await msg.delete().catch(() => {});
+        }
+    }
+}
+
 // ----------------------
 // READY
 // ----------------------
@@ -1082,6 +1100,18 @@ client.on('messageCreate', async (message) => {
                 .setTimestamp();
 
             await tourwinsChannel.send({ embeds: [tourEmbed] });
+
+            await pruneRecentBotEmbeds(
+                tourwinsChannel,
+                (msg) => {
+                    const embed = msg.embeds?.[0];
+                    if (!embed) return false;
+                    const description = embed.description || '';
+                    const embedImage = embed.image?.url || '';
+                    return description.includes(`Tour win by ${userMention}`) && embedImage === imageLink;
+                },
+                true
+            );
             
             // Confirm in the original channel (only if different from 「🥇」tour-wins)
             if (message.channel.id !== tourwinsChannel.id) {
@@ -1090,6 +1120,17 @@ client.on('messageCreate', async (message) => {
                     .setColor(0x00cc44);
 
                 await message.channel.send({ embeds: [confirmEmbed] });
+
+                await pruneRecentBotEmbeds(
+                    message.channel,
+                    (msg) => {
+                        const embed = msg.embeds?.[0];
+                        if (!embed) return false;
+                        const description = embed.description || '';
+                        return description === `✅ Tour win posted for ${userMention} in <#${tourwinsChannel.id}>`;
+                    },
+                    true
+                );
             }
         } catch (err) {
             console.error('Tour win error:', err);
@@ -1152,6 +1193,18 @@ client.on('messageCreate', async (message) => {
             .setTimestamp();
 
         await message.channel.send({ embeds: [embed] });
+
+        await pruneRecentBotEmbeds(
+            message.channel,
+            (msg) => {
+                const e = msg.embeds?.[0];
+                if (!e) return false;
+                if (e.title !== '📖 Bot Commands') return false;
+                const footerText = e.footer?.text || '';
+                return footerText.includes(`Requested by ${message.author.tag}`);
+            },
+            true
+        );
         return;
     }
 });
