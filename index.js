@@ -77,7 +77,7 @@ const client = new Client({
 });
 
 let activeInvites = new Map();
-let lastTourwinSend = {}; // Track last tourwin send per channel
+const processedMessages = new Set();
 
 // ----------------------
 // HELPER: Check Permissions
@@ -281,6 +281,9 @@ client.on('guildMemberAdd', async (member) => {
 // ----------------------
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    if (processedMessages.has(message.id)) return;
+    processedMessages.add(message.id);
+    setTimeout(() => processedMessages.delete(message.id), 5000);
 
     const content = message.content.trim();
     const args = content.split(/\s+/);
@@ -969,14 +972,6 @@ client.on('messageCreate', async (message) => {
             if (!tourwinsChannel) {
                 return message.channel.send('❌ The "tourwinstest" channel does not exist.');
             }
-
-            // Prevent duplicate sends within 2 seconds
-            const key = `${tourwinsChannel.id}_${userInput}_${imageLink}`;
-            const now = Date.now();
-            if (lastTourwinSend[key] && (now - lastTourwinSend[key]) < 2000) {
-                return; // Skip if sent recently
-            }
-            lastTourwinSend[key] = now;
 
             // Extract user ID and format as mention
             let userId = userInput;
