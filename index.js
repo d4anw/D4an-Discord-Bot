@@ -951,6 +951,47 @@ client.on('messageCreate', async (message) => {
     }
 
     // ----------------------
+    // TOURWIN
+    // ----------------------
+    if (command === '!tourwin') {
+        const user = args[1];
+        const imageLink = args[2];
+
+        if (!user || !imageLink) {
+            return message.channel.send('❌ Usage: `!tourwin {user} {imagelink}`');
+        }
+
+        try {
+            // Find the tourwinstest channel
+            const tourwinsChannel = message.guild.channels.cache.find(ch => ch.name === 'tourwinstest');
+            
+            if (!tourwinsChannel) {
+                return message.channel.send('❌ The "tourwinstest" channel does not exist.');
+            }
+
+            // Create the embed
+            const tourEmbed = new EmbedBuilder()
+                .setTitle(`Tour win by ${user}`)
+                .setImage(imageLink)
+                .setColor('#FF9527')
+                .setTimestamp();
+
+            await tourwinsChannel.send({ embeds: [tourEmbed] });
+            
+            // Confirm in the original channel
+            const confirmEmbed = new EmbedBuilder()
+                .setDescription(`✅ Tour win posted for **${user}** in <#${tourwinsChannel.id}>`)
+                .setColor(0x00cc44);
+
+            await message.channel.send({ embeds: [confirmEmbed] });
+        } catch (err) {
+            console.error('Tour win error:', err);
+            message.channel.send('❌ Failed to post tour win.');
+        }
+        return;
+    }
+
+    // ----------------------
     // HELP
     // ----------------------
     if (command === '!help') {
