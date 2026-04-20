@@ -986,12 +986,14 @@ client.on('messageCreate', async (message) => {
 
             await tourwinsChannel.send({ embeds: [tourEmbed] });
             
-            // Confirm in the original channel
-            const confirmEmbed = new EmbedBuilder()
-                .setDescription(`✅ Tour win posted for ${userMention} in <#${tourwinsChannel.id}>`)
-                .setColor(0x00cc44);
+            // Confirm in the original channel (only if different from tourwinstest)
+            if (message.channel.id !== tourwinsChannel.id) {
+                const confirmEmbed = new EmbedBuilder()
+                    .setDescription(`✅ Tour win posted for ${userMention} in <#${tourwinsChannel.id}>`)
+                    .setColor(0x00cc44);
 
-            await message.channel.send({ embeds: [confirmEmbed] });
+                await message.channel.send({ embeds: [confirmEmbed] });
+            }
         } catch (err) {
             console.error('Tour win error:', err);
             message.channel.send('❌ Failed to post tour win.');
