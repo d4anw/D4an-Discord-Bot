@@ -18,6 +18,7 @@ const ticketLogChannelId = "1488962491818967301";
 const chatlogChannelId = "1488962511150649364";
 const welcomeChannelId = "1488858798356693165";
 const invitesChannelId = "1488858798356693167";
+const ticketStaffRoleNames = ["Owner", "Admin", "Helper"];
 
 const INVITE_FILE = './invites.json';
 const WARNS_FILE = './warns.json';
@@ -1352,34 +1353,57 @@ client.on('interactionCreate', async (interaction) => {
 
         const guild = interaction.guild;
 
+        const staffRoles = ticketStaffRoleNames
+            .map((roleName) => guild.roles.cache.find((role) => role.name.toLowerCase() === roleName.toLowerCase()))
+            .filter(Boolean);
+
+        const permissionOverwrites = [
+            {
+                id: guild.id,
+                deny: [PermissionsBitField.Flags.ViewChannel]
+            },
+            {
+                id: interaction.user.id,
+                allow: [
+                    PermissionsBitField.Flags.ViewChannel,
+                    PermissionsBitField.Flags.SendMessages,
+                    PermissionsBitField.Flags.ReadMessageHistory
+                ]
+            },
+            {
+                id: "1490715225140494368", // MOD ROLE
+                allow: [
+                    PermissionsBitField.Flags.ViewChannel,
+                    PermissionsBitField.Flags.SendMessages,
+                    PermissionsBitField.Flags.ReadMessageHistory
+                ]
+            }
+        ];
+
+        for (const role of staffRoles) {
+            if (permissionOverwrites.some((overwrite) => overwrite.id === role.id)) continue;
+
+            permissionOverwrites.push({
+                id: role.id,
+                allow: [
+                    PermissionsBitField.Flags.ViewChannel,
+                    PermissionsBitField.Flags.SendMessages,
+                    PermissionsBitField.Flags.ReadMessageHistory
+                ]
+            });
+        }
+
         const channel = await guild.channels.create({
             name: `ticket-${interaction.user.username}`,
             type: 0,
-            permissionOverwrites: [
-                {
-                    id: guild.id,
-                    deny: [PermissionsBitField.Flags.ViewChannel]
-                },
-                {
-                    id: interaction.user.id,
-                    allow: [
-                        PermissionsBitField.Flags.ViewChannel,
-                        PermissionsBitField.Flags.SendMessages,
-                        PermissionsBitField.Flags.ReadMessageHistory
-                    ]
-                },
-                {
-                    id: "1490715225140494368", // MOD ROLE
-                    allow: [
-                        PermissionsBitField.Flags.ViewChannel,
-                        PermissionsBitField.Flags.SendMessages,
-                        PermissionsBitField.Flags.ReadMessageHistory
-                    ]
-                }
-            ]
+            topic: `ticket_owner:${interaction.user.id}`,
+            permissionOverwrites
         });
 
-        await channel.send(`🎫 Ticket created by <@${interaction.user.id}>`);
+        const staffMentions = staffRoles.map((role) => `<@&${role.id}>`).join(' ');
+        const ticketCreatedMessage = `${staffMentions ? `${staffMentions}\n` : ''}🎫 Ticket created by <@${interaction.user.id}>`;
+
+        await channel.send(ticketCreatedMessage);
 
         const closeRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1455,6 +1479,21 @@ client.on('interactionCreate', async (interaction) => {
 
             allMessages.reverse();
 
+            const ownerMatch = ticketChannel.topic?.match(/ticket_owner:(\d+)/);
+            const ticketOwnerId = ownerMatch ? ownerMatch[1] : null;
+
+            const chatContent = allMessages.length > 0
+                ? allMessages.map((msg) => {
+                    const attachments = msg.attachments.map((att) => att.url).join(', ');
+                    const content = msg.content || '[no text content]';
+                    const extra = attachments ? ` (attachments: ${attachments})` : '';
+                    return `[${msg.createdAt.toISOString()}] ${msg.author.tag}: ${content}${extra}`;
+                }).join('\n')
+                : 'No messages in this ticket.';
+
+            const chatlogBuffer = Buffer.from(chatContent, 'utf-8');
+            const chatlogFilename = `${ticketChannel.name}-chatlog.txt`;
+
             try {
                 const chatlogChannel = await client.channels.fetch(chatlogChannelId);
 
@@ -1475,26 +1514,42 @@ client.on('interactionCreate', async (interaction) => {
                         .setColor(0xff0000)
                         .setThumbnail(interaction.user.displayAvatarURL());
 
-                    if (allMessages.length > 0) {
-                        const chatContent = allMessages.map(msg =>
-                            `[${msg.createdAt.toLocaleString()}] ${msg.author.tag}: ${msg.content}`
-                        ).join('\n');
-
-                        const buffer = Buffer.from(chatContent, 'utf-8');
-
-                        await chatlogChannel.send({
-                            embeds: [chatlogEmbed],
-                            files: [{
-                                attachment: buffer,
-                                name: `${ticketChannel.name}-chatlog.txt`
-                            }]
-                        });
-                    } else {
-                        await chatlogChannel.send({ embeds: [chatlogEmbed] });
-                    }
+                    await chatlogChannel.send({
+                        embeds: [chatlogEmbed],
+                        files: [{
+                            attachment: chatlogBuffer,
+                            name: chatlogFilename
+                        }]
+                    });
                 }
             } catch (chatlogError) {
                 console.error('Error with chatlog channel:', chatlogError);
+            }
+
+            if (ticketOwnerId) {
+                try {
+                    const ticketOwner = await client.users.fetch(ticketOwnerId);
+
+                    const ownerDmEmbed = new EmbedBuilder()
+                        .setTitle('📋 Your Ticket Chat Log')
+                        .setDescription(`Your ticket **${ticketChannel.name}** has been closed.`)
+                        .addFields(
+                            { name: 'Closed By', value: `<@${interaction.user.id}>`, inline: true },
+                            { name: 'Total Messages', value: `${allMessages.length}`, inline: true },
+                            { name: 'Closed At', value: `<t:${Math.floor(Date.now() / 1000)}:f>` }
+                        )
+                        .setColor(0xFF9527);
+
+                    await ticketOwner.send({
+                        embeds: [ownerDmEmbed],
+                        files: [{
+                            attachment: chatlogBuffer,
+                            name: chatlogFilename
+                        }]
+                    });
+                } catch (dmError) {
+                    console.error('Could not DM ticket owner chat log:', dmError);
+                }
             }
 
             await interaction.editReply({ content: 'Ticket is being closed...' });
