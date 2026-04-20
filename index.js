@@ -78,6 +78,7 @@ const client = new Client({
 
 let activeInvites = new Map();
 const processedMessages = new Set();
+const recentTourwinKeys = new Set();
 
 // ----------------------
 // HELPER: Check Permissions
@@ -108,6 +109,28 @@ function downloadEmoji(url) {
                 }
             });
         }).on('error', reject);
+    });
+}
+
+function buildTourwinKey(channelId, userMention, imageLink) {
+    return `${channelId}:${userMention}:${imageLink}`;
+}
+
+async function hasRecentTourwinMessage(channel, userMention, imageLink, botUserId) {
+    const recent = await channel.messages.fetch({ limit: 20 });
+    const now = Date.now();
+
+    return recent.some((msg) => {
+        if (msg.author.id !== botUserId) return false;
+        if ((now - msg.createdTimestamp) > 15000) return false;
+
+        const embed = msg.embeds?.[0];
+        if (!embed) return false;
+
+        const description = embed.description || '';
+        const embedImage = embed.image?.url || '';
+
+        return description.includes(`Tour win by ${userMention}`) && embedImage === imageLink;
     });
 }
 
@@ -959,7 +982,7 @@ client.on('messageCreate', async (message) => {
     // ----------------------
     if (command === '!tourwin') {
         const userInput = args[1];
-        const imageLink = args[2];
+        const imageLink = args[2] || message.attachments.first()?.url;
 
         if (!userInput || !imageLink) {
             return message.channel.send('❌ Usage: `!tourwin {user} {imagelink}`');
@@ -980,6 +1003,19 @@ client.on('messageCreate', async (message) => {
             }
 
             const userMention = `<@${userId}>`;
+            const tourwinKey = buildTourwinKey(tourwinsChannel.id, userMention, imageLink);
+
+            if (recentTourwinKeys.has(tourwinKey)) {
+                return;
+            }
+
+            recentTourwinKeys.add(tourwinKey);
+            setTimeout(() => recentTourwinKeys.delete(tourwinKey), 15000);
+
+            const alreadyPosted = await hasRecentTourwinMessage(tourwinsChannel, userMention, imageLink, client.user.id);
+            if (alreadyPosted) {
+                return;
+            }
 
             // Create the embed with larger title and proper mention
             const tourEmbed = new EmbedBuilder()
