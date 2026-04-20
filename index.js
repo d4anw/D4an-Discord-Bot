@@ -1162,6 +1162,18 @@ client.on('messageCreate', async (message) => {
             }
 
             const userMention = `<@${userId}>`;
+            let userDisplay = userMention;
+
+            try {
+                const member = await message.guild.members.fetch(userId).catch(() => null);
+                if (member) {
+                    userDisplay = `@${member.displayName}`;
+                } else {
+                    const user = await client.users.fetch(userId).catch(() => null);
+                    if (user) userDisplay = `@${user.username}`;
+                }
+            } catch {}
+
             const tourwinKey = buildTourwinKey(tourwinsChannel.id, userMention, imageLink);
 
             if (recentTourwinKeys.has(tourwinKey)) {
@@ -1191,7 +1203,7 @@ client.on('messageCreate', async (message) => {
 
             // Create the embed with larger title and proper mention
             const tourEmbed = new EmbedBuilder()
-                .setDescription(`# Tour win by ${userMention} <:Hug2:1489232052086898770>`)
+                .setDescription(`# Tour win by ${userDisplay} <:Hug2:1489232052086898770>\n${userMention}`)
                 .setURL(imageLink)
                 .setImage(`attachment://${imageFile.name}`)
                 .setColor('#FF9527')
