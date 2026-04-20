@@ -954,10 +954,10 @@ client.on('messageCreate', async (message) => {
     // TOURWIN
     // ----------------------
     if (command === '!tourwin') {
-        const user = args[1];
+        const userInput = args[1];
         const imageLink = args[2];
 
-        if (!user || !imageLink) {
+        if (!userInput || !imageLink) {
             return message.channel.send('❌ Usage: `!tourwin {user} {imagelink}`');
         }
 
@@ -969,9 +969,18 @@ client.on('messageCreate', async (message) => {
                 return message.channel.send('❌ The "tourwinstest" channel does not exist.');
             }
 
-            // Create the embed
+            // Extract user ID and format as mention
+            let userId = userInput;
+            if (userInput.startsWith('<@')) {
+                userId = userInput.match(/\d+/)[0];
+            }
+
+            const userMention = `<@${userId}>`;
+
+            // Create the embed with larger title and proper mention
             const tourEmbed = new EmbedBuilder()
-                .setTitle(`Tour win by ${user}`)
+                .setAuthor({ name: 'Tour win by' })
+                .setDescription(userMention)
                 .setImage(imageLink)
                 .setColor('#FF9527')
                 .setTimestamp();
@@ -980,7 +989,7 @@ client.on('messageCreate', async (message) => {
             
             // Confirm in the original channel
             const confirmEmbed = new EmbedBuilder()
-                .setDescription(`✅ Tour win posted for **${user}** in <#${tourwinsChannel.id}>`)
+                .setDescription(`✅ Tour win posted for ${userMention} in <#${tourwinsChannel.id}>`)
                 .setColor(0x00cc44);
 
             await message.channel.send({ embeds: [confirmEmbed] });
