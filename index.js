@@ -979,7 +979,7 @@ client.on('messageCreate', async (message) => {
 
             // Create the embed with larger title and proper mention
             const tourEmbed = new EmbedBuilder()
-                .setDescription(`# Tour win by ${userMention}`)
+                .setDescription(`# Tour win by ${userMention} <:Hug2:1489232052086898770>`)
                 .setImage(imageLink)
                 .setColor('#FF9527')
                 .setTimestamp();
