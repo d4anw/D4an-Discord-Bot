@@ -1038,12 +1038,12 @@ client.on('messageCreate', async (message) => {
         }
 
         try {
-            // Find the tourwinstest channel
-            const tourwinsChannel = message.guild.channels.cache.find(ch => ch.name === 'tourwinstest');
+            // Find the 「🥇」tour-wins channel
+            const tourwinsChannel = message.guild.channels.cache.find(ch => ch.name === '「🥇」tour-wins');
             
             if (!tourwinsChannel) {
                 releaseLock(lockName);
-                return message.channel.send('❌ The "tourwinstest" channel does not exist.');
+                return message.channel.send('❌ The "「🥇」tour-wins" channel does not exist.');
             }
 
             // Extract user ID and format as mention
@@ -1078,7 +1078,7 @@ client.on('messageCreate', async (message) => {
 
             await tourwinsChannel.send({ embeds: [tourEmbed] });
             
-            // Confirm in the original channel (only if different from tourwinstest)
+            // Confirm in the original channel (only if different from 「🥇」tour-wins)
             if (message.channel.id !== tourwinsChannel.id) {
                 const confirmEmbed = new EmbedBuilder()
                     .setDescription(`✅ Tour win posted for ${userMention} in <#${tourwinsChannel.id}>`)
@@ -1118,6 +1118,10 @@ client.on('messageCreate', async (message) => {
                 {
                     name: '😄 Emojis',
                     value: '`!add <emoji>` — Add a custom emoji to the server'
+                },
+                {
+                    name: '🏆 Tour Wins',
+                    value: '`!tourwin @user <imagelink>` — Post a tour win in #「🥇」tour-wins'
                 },
                 {
                     name: '🔨 Moderation',
