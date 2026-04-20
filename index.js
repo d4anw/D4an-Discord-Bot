@@ -10,6 +10,7 @@ const {
     ActivityType
 } = require('discord.js');
 const fs = require('fs');
+const http = require('http');
 const https = require('https');
 const path = require('path');
 
@@ -155,6 +156,89 @@ function downloadEmoji(url) {
     });
 }
 
+function downloadRemoteFile(url, redirectCount = 0) {
+    return new Promise((resolve, reject) => {
+        if (redirectCount > 5) {
+            reject(new Error('Too many redirects while downloading image'));
+            return;
+        }
+
+        let parsed;
+        try {
+            parsed = new URL(url);
+        } catch {
+            reject(new Error('Invalid image URL'));
+            return;
+        }
+
+        const lib = parsed.protocol === 'http:' ? http : https;
+
+        const req = lib.get(parsed, (res) => {
+            const status = res.statusCode || 0;
+
+            if ([301, 302, 303, 307, 308].includes(status) && res.headers.location) {
+                const nextUrl = new URL(res.headers.location, parsed).toString();
+                res.resume();
+                resolve(downloadRemoteFile(nextUrl, redirectCount + 1));
+                return;
+            }
+
+            if (status !== 200) {
+                res.resume();
+                reject(new Error(`Failed to download image: HTTP ${status}`));
+                return;
+            }
+
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+                if (buffer.length === 0) {
+                    reject(new Error('Downloaded image is empty'));
+                    return;
+                }
+
+                resolve({
+                    buffer,
+                    contentType: res.headers['content-type'] || ''
+                });
+            });
+        });
+
+        req.on('error', reject);
+    });
+}
+
+function extensionFromContentType(contentType) {
+    const cleanType = String(contentType || '').split(';')[0].trim().toLowerCase();
+    const map = {
+        'image/png': 'png',
+        'image/jpeg': 'jpg',
+        'image/jpg': 'jpg',
+        'image/webp': 'webp',
+        'image/gif': 'gif'
+    };
+    return map[cleanType] || null;
+}
+
+function buildTourwinFilename(imageUrl, contentType) {
+    const contentExt = extensionFromContentType(contentType);
+    if (contentExt) {
+        return `tourwin-${Date.now()}.${contentExt}`;
+    }
+
+    try {
+        const parsed = new URL(imageUrl);
+        const ext = path.extname(parsed.pathname || '').replace('.', '').toLowerCase();
+        if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) {
+            const normalized = ext === 'jpeg' ? 'jpg' : ext;
+            return `tourwin-${Date.now()}.${normalized}`;
+        }
+    } catch {}
+
+    return `tourwin-${Date.now()}.png`;
+}
+
 function buildTourwinKey(channelId, userMention, imageLink) {
     return `${channelId}:${userMention}:${imageLink}`;
 }
@@ -172,8 +256,10 @@ async function hasRecentTourwinMessage(channel, userMention, imageLink, botUserI
 
         const description = embed.description || '';
         const embedImage = embed.image?.url || '';
+        const embedSourceUrl = embed.url || '';
 
-        return description.includes(`Tour win by ${userMention}`) && embedImage === imageLink;
+        return description.includes(`Tour win by ${userMention}`)
+            && (embedImage === imageLink || embedSourceUrl === imageLink);
     });
 }
 
@@ -1092,14 +1178,26 @@ client.on('messageCreate', async (message) => {
                 return;
             }
 
+            let imageFile;
+            try {
+                const { buffer, contentType } = await downloadRemoteFile(imageLink);
+                const fileName = buildTourwinFilename(imageLink, contentType);
+                imageFile = { attachment: buffer, name: fileName };
+            } catch (downloadErr) {
+                console.error('Tour win image download error:', downloadErr);
+                releaseLock(lockName);
+                return message.channel.send('❌ Could not fetch that image. Please use a direct image URL or upload an attachment.');
+            }
+
             // Create the embed with larger title and proper mention
             const tourEmbed = new EmbedBuilder()
                 .setDescription(`# Tour win by ${userMention} <:Hug2:1489232052086898770>`)
-                .setImage(imageLink)
+                .setURL(imageLink)
+                .setImage(`attachment://${imageFile.name}`)
                 .setColor('#FF9527')
                 .setTimestamp();
 
-            await tourwinsChannel.send({ embeds: [tourEmbed] });
+            await tourwinsChannel.send({ embeds: [tourEmbed], files: [imageFile] });
 
             await pruneRecentBotEmbeds(
                 tourwinsChannel,
@@ -1108,7 +1206,9 @@ client.on('messageCreate', async (message) => {
                     if (!embed) return false;
                     const description = embed.description || '';
                     const embedImage = embed.image?.url || '';
-                    return description.includes(`Tour win by ${userMention}`) && embedImage === imageLink;
+                    const embedSourceUrl = embed.url || '';
+                    return description.includes(`Tour win by ${userMention}`)
+                        && (embedImage === imageLink || embedSourceUrl === imageLink);
                 },
                 true
             );
