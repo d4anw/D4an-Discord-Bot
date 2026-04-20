@@ -11,6 +11,7 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const https = require('https');
+const path = require('path');
 
 const ticketLogChannelId = "1488962491818967301";
 const chatlogChannelId = "1488962511150649364";
@@ -19,6 +20,11 @@ const invitesChannelId = "1488858798356693167";
 
 const INVITE_FILE = './invites.json';
 const WARNS_FILE = './warns.json';
+const LOCK_DIR = './command-locks';
+
+if (!fs.existsSync(LOCK_DIR)) {
+    fs.mkdirSync(LOCK_DIR, { recursive: true });
+}
 
 // ----------------------
 // STORE: INVITES
@@ -85,6 +91,43 @@ const recentTourwinKeys = new Set();
 // ----------------------
 function hasPermission(member, flag) {
     return member.permissions.has(flag);
+}
+
+function acquireLock(lockName, ttlMs = 60000) {
+    const lockPath = path.join(LOCK_DIR, `${lockName}.lock`);
+    const now = Date.now();
+
+    try {
+        fs.writeFileSync(lockPath, String(now), { flag: 'wx' });
+        return true;
+    } catch (err) {
+        if (err.code !== 'EEXIST') {
+            throw err;
+        }
+
+        try {
+            const stats = fs.statSync(lockPath);
+            const age = now - stats.mtimeMs;
+            if (age > ttlMs) {
+                fs.unlinkSync(lockPath);
+                fs.writeFileSync(lockPath, String(now), { flag: 'wx' });
+                return true;
+            }
+        } catch {
+            return false;
+        }
+
+        return false;
+    }
+}
+
+function releaseLock(lockName) {
+    const lockPath = path.join(LOCK_DIR, `${lockName}.lock`);
+    try {
+        if (fs.existsSync(lockPath)) {
+            fs.unlinkSync(lockPath);
+        }
+    } catch {}
 }
 
 // ----------------------
@@ -981,10 +1024,16 @@ client.on('messageCreate', async (message) => {
     // TOURWIN
     // ----------------------
     if (command === '!tourwin') {
+        const lockName = `tourwin_${message.id}`;
+        if (!acquireLock(lockName, 120000)) {
+            return;
+        }
+
         const userInput = args[1];
         const imageLink = args[2] || message.attachments.first()?.url;
 
         if (!userInput || !imageLink) {
+            releaseLock(lockName);
             return message.channel.send('❌ Usage: `!tourwin {user} {imagelink}`');
         }
 
@@ -993,6 +1042,7 @@ client.on('messageCreate', async (message) => {
             const tourwinsChannel = message.guild.channels.cache.find(ch => ch.name === 'tourwinstest');
             
             if (!tourwinsChannel) {
+                releaseLock(lockName);
                 return message.channel.send('❌ The "tourwinstest" channel does not exist.');
             }
 
@@ -1006,6 +1056,7 @@ client.on('messageCreate', async (message) => {
             const tourwinKey = buildTourwinKey(tourwinsChannel.id, userMention, imageLink);
 
             if (recentTourwinKeys.has(tourwinKey)) {
+                releaseLock(lockName);
                 return;
             }
 
@@ -1014,6 +1065,7 @@ client.on('messageCreate', async (message) => {
 
             const alreadyPosted = await hasRecentTourwinMessage(tourwinsChannel, userMention, imageLink, client.user.id);
             if (alreadyPosted) {
+                releaseLock(lockName);
                 return;
             }
 
@@ -1037,6 +1089,8 @@ client.on('messageCreate', async (message) => {
         } catch (err) {
             console.error('Tour win error:', err);
             message.channel.send('❌ Failed to post tour win.');
+        } finally {
+            releaseLock(lockName);
         }
         return;
     }
