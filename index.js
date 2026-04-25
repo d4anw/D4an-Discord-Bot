@@ -240,11 +240,11 @@ function buildTourwinFilename(imageUrl, contentType) {
     return `tourwin-${Date.now()}.png`;
 }
 
-function buildTourwinKey(channelId, userMention, imageLink) {
-    return `${channelId}:${userMention}:${imageLink}`;
+function buildTourwinKey(channelId, winnerMentions, imageLink) {
+    return `${channelId}:${winnerMentions}:${imageLink}`;
 }
 
-async function hasRecentTourwinMessage(channel, userMention, imageLink, botUserId) {
+async function hasRecentTourwinMessage(channel, winnerMentions, imageLink, botUserId) {
     const recent = await channel.messages.fetch({ limit: 20 });
     const now = Date.now();
 
@@ -259,7 +259,7 @@ async function hasRecentTourwinMessage(channel, userMention, imageLink, botUserI
         const embedImage = embed.image?.url || '';
         const embedSourceUrl = embed.url || '';
 
-        return description.includes(`Tour win by ${userMention}`)
+        return description.includes(winnerMentions)
             && (embedImage === imageLink || embedSourceUrl === imageLink);
     });
 }
@@ -1139,12 +1139,15 @@ client.on('messageCreate', async (message) => {
             return;
         }
 
-        const userInput = args[1];
-        const imageLink = args[2] || message.attachments.first()?.url;
+        const inputArgs = args.slice(1);
+        const lastArg = inputArgs[inputArgs.length - 1] || '';
+        const explicitImageLink = /^https?:\/\//i.test(lastArg) ? inputArgs.pop() : null;
+        const imageLink = explicitImageLink || message.attachments.first()?.url;
+        const winners = Array.from(message.mentions.users.values());
 
-        if (!userInput || !imageLink) {
+        if (winners.length === 0 || !imageLink) {
             releaseLock(lockName);
-            return message.channel.send('❌ Usage: `!tourwin {user} {imagelink}`');
+            return message.channel.send('❌ Usage: `!tourwin @user [@user2 @user3 ...] {imagelink}` (or attach an image)');
         }
 
         try {
@@ -1156,26 +1159,16 @@ client.on('messageCreate', async (message) => {
                 return message.channel.send('❌ The "「🥇」tour-wins" channel does not exist.');
             }
 
-            // Extract user ID and format as mention
-            let userId = userInput;
-            if (userInput.startsWith('<@')) {
-                userId = userInput.match(/\d+/)[0];
+            const winnerMentions = winners.map((user) => `<@${user.id}>`).join(' ');
+            const winnerDisplayNames = [];
+
+            for (const winner of winners) {
+                const member = await message.guild.members.fetch(winner.id).catch(() => null);
+                winnerDisplayNames.push(member ? `@${member.displayName}` : `@${winner.username}`);
             }
 
-            const userMention = `<@${userId}>`;
-            let userDisplay = userMention;
-
-            try {
-                const member = await message.guild.members.fetch(userId).catch(() => null);
-                if (member) {
-                    userDisplay = `@${member.displayName}`;
-                } else {
-                    const user = await client.users.fetch(userId).catch(() => null);
-                    if (user) userDisplay = `@${user.username}`;
-                }
-            } catch {}
-
-            const tourwinKey = buildTourwinKey(tourwinsChannel.id, userMention, imageLink);
+            const winnerDisplayLine = winnerDisplayNames.join(', ');
+            const tourwinKey = buildTourwinKey(tourwinsChannel.id, winnerMentions, imageLink);
 
             if (recentTourwinKeys.has(tourwinKey)) {
                 releaseLock(lockName);
@@ -1185,7 +1178,7 @@ client.on('messageCreate', async (message) => {
             recentTourwinKeys.add(tourwinKey);
             setTimeout(() => recentTourwinKeys.delete(tourwinKey), 15000);
 
-            const alreadyPosted = await hasRecentTourwinMessage(tourwinsChannel, userMention, imageLink, client.user.id);
+            const alreadyPosted = await hasRecentTourwinMessage(tourwinsChannel, winnerMentions, imageLink, client.user.id);
             if (alreadyPosted) {
                 releaseLock(lockName);
                 return;
@@ -1204,7 +1197,7 @@ client.on('messageCreate', async (message) => {
 
             // Create the embed with larger title and proper mention
             const tourEmbed = new EmbedBuilder()
-                .setDescription(`# Tour win by ${userDisplay} <:Hug2:1489232052086898770>\n${userMention}`)
+                .setDescription(`# Tour win by ${winnerDisplayLine} <:Hug2:1489232052086898770>\n${winnerMentions}`)
                 .setURL(imageLink)
                 .setImage(`attachment://${imageFile.name}`)
                 .setColor('#FF9527')
@@ -1220,7 +1213,7 @@ client.on('messageCreate', async (message) => {
                     const description = embed.description || '';
                     const embedImage = embed.image?.url || '';
                     const embedSourceUrl = embed.url || '';
-                    return description.includes(`Tour win by ${userMention}`)
+                    return description.includes(winnerMentions)
                         && (embedImage === imageLink || embedSourceUrl === imageLink);
                 },
                 true
@@ -1229,7 +1222,7 @@ client.on('messageCreate', async (message) => {
             // Confirm in the original channel (only if different from 「🥇」tour-wins)
             if (message.channel.id !== tourwinsChannel.id) {
                 const confirmEmbed = new EmbedBuilder()
-                    .setDescription(`✅ Tour win posted for ${userMention} in <#${tourwinsChannel.id}>`)
+                    .setDescription(`✅ Tour win posted for ${winnerMentions} in <#${tourwinsChannel.id}>`)
                     .setColor(0x00cc44);
 
                 await message.channel.send({ embeds: [confirmEmbed] });
@@ -1240,7 +1233,7 @@ client.on('messageCreate', async (message) => {
                         const embed = msg.embeds?.[0];
                         if (!embed) return false;
                         const description = embed.description || '';
-                        return description === `✅ Tour win posted for ${userMention} in <#${tourwinsChannel.id}>`;
+                        return description === `✅ Tour win posted for ${winnerMentions} in <#${tourwinsChannel.id}>`;
                     },
                     true
                 );
